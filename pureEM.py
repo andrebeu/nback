@@ -4,6 +4,7 @@ import numpy as np
 """ 
 it is important to choose appropriate initializers for the M_keys 
   otherwise everything will be too similar on the similarity-based lookup 
+  also, using softmax with higher temperature seems to help
 """
 
 NBACK = 2
@@ -29,28 +30,46 @@ NBACK = 2
 #     return T,X,Y
 
 
-
-
-
 NSTIM = 3
 NTRIALS = 4
 class ToyNBackTask2():
+  """ 2back on 4 trials with 3 stim """
   
   def __init__(self,nback=NBACK):
     self.nback = nback
     return None
 
-  def genseq(self,ntrials=NTRIALS):
+  def genseq(self):
     seq1 = np.random.choice([0,1,2],2,replace=False)
     np.random.shuffle(seq1)
     seq2 = np.random.choice([0,1,2],2,replace=False)
     np.random.shuffle(seq2)
     seq = np.concatenate([seq1,seq2])
-    seqroll = seq == np.roll(seq,self.nback)
-    seqroll[:self.nback] = 0
-    T = np.expand_dims(np.arange(ntrials),0)
+    seqroll = seq == np.roll(seq,2)
+    seqroll[:2] = 0
+    T = np.expand_dims(np.arange(4),0)
     X = np.expand_dims(seq,0)
     Y = np.expand_dims(seqroll.astype(int),0)
+    return T,X,Y
+
+
+NSTIM = 3
+NTRIALS = 5
+class ToyNBackTask3():
+  
+  def __init__(self,nback=2,nstim=NSTIM):
+    self.nback = nback
+    self.nstim = nstim
+    return None
+
+  def genseq(self,ntrials=NTRIALS):
+    seq = np.random.randint(0,self.nstim,ntrials)
+    seqroll = np.roll(seq,2)
+    X = np.expand_dims(seq,0)
+    Y = (seqroll==seq).astype(int)
+    Y[:self.nback] = 0
+    Y = np.expand_dims(Y,0)
+    T = np.expand_dims(np.arange(ntrials),0)
     return T,X,Y
 
 
@@ -58,9 +77,10 @@ class ToyNBackTask2():
 Feed forward network with an HD
 """
 
+
 class PureEM():
 
-  def __init__(self,nback=NBACK,nstim=NSTIM,ntrials=NTRIALS,dim=10):
+  def __init__(self,nback=NBACK,nstim=NSTIM,ntrials=NTRIALS,dim=15):
     self.nback = nback
     self.nstim = nstim
     self.ntrials = ntrials
@@ -78,6 +98,7 @@ class PureEM():
       self.context,self.stim = self.trial_embed,self.stim_embed
       # init memory mat
       response_layer1 = tf.keras.layers.Dense(self.dim,activation='relu')
+
       response_layer2 = tf.keras.layers.Dense(2,activation=None)
       self.response_layer = lambda x: response_layer2(response_layer1(x))
       # unroll
@@ -137,6 +158,7 @@ class PureEM():
       context_t = context[:,tstep,:]
       # retrieve memory using stim
       retrieved_context_t = self.retrieve_memory(stim_t)
+      self.retrieved_context_t = retrieved_context_t
       # compute response
       response_in = tf.concat([context_t,retrieved_context_t],axis=-1)
       response_t = self.response_layer(response_in)
@@ -150,7 +172,7 @@ class PureEM():
     return response_logits
 
 
-  def retrieve_memory(self,query,sm_temp=10):
+  def retrieve_memory(self,query,sm_temp=10,discount_rate=0.9):
     """
     NB online works in online mode 
       matmul operation cannot handle 3D tensors [batch,key,dim]
@@ -160,7 +182,11 @@ class PureEM():
     # form retrieval similarity vector
     query_key_sim = 1-tf.keras.metrics.cosine(query,keys)
     sm_sim = lambda x: tf.exp(sm_temp*x)/tf.reduce_sum(tf.exp(sm_temp*x),axis=0)
-    query_key_sim = sm_sim(query_key_sim)
+    discount_arr = [discount_rate**np.abs(self.nback-i-1) for i in range(keys.shape[0])] # take nback into account
+    # discount_arr = [discount_rate**i for i in range(keys.shape[0])] # slightly less cheating
+    print(discount_arr)
+    query_key_sim = sm_sim(query_key_sim*discount_arr)
+    self.query_key_sim = query_key_sim
     # use similarity to form memory retrieval
     retrieved_memory_ = tf.transpose(
                         tf.matmul(
