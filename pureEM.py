@@ -80,7 +80,7 @@ Feed forward network with an HD
 
 class PureEM():
 
-  def __init__(self,nback=NBACK,nstim=NSTIM,ntrials=NTRIALS,dim=5):
+  def __init__(self,nback=NBACK,nstim=NSTIM,ntrials=NTRIALS,dim=25):
     self.nback = nback
     self.nstim = nstim
     self.ntrials = ntrials
@@ -172,7 +172,7 @@ class PureEM():
     return response_logits
 
 
-  def retrieve_memory(self,query,temp=1,discount_rate=0.9,discount_type='nback'):
+  def retrieve_memory(self,query,temp=6,discount_rate=0.9,discount_type='decaying'):
     """
     NB online works in online mode 
       matmul operation cannot handle 3D tensors [batch,key,dim]
@@ -182,18 +182,18 @@ class PureEM():
     # form retrieval similarity vector
     query_key_sim = 1-tf.keras.metrics.cosine(query,keys)
     softmax = lambda x: tf.exp(temp*x)/tf.reduce_sum(tf.exp(temp*x),axis=0)
-    tanh = lambda x: tf.tanh(temp*x)/tf.reduce_sum(tf.tanh(temp*x),axis=0)
+    # tanh = lambda x: tf.tanh(temp*x)/tf.reduce_sum(tf.tanh(temp*x),axis=0)
     # tanh = lambda x: tf.tanh(temp*x)
     if discount_type=='nback':
       discount_arr = [discount_rate**np.abs(i-1) for i in range(keys.shape[0])] 
-    else:
-      discount_arr = [discount_rate**i for i in range(keys.shape[0])] # slightly less cheating
+    elif discount_type=='decaying': 
+      discount_arr = [discount_rate**i for i in range(keys.shape[0])] 
     discount_arr.reverse()
     print(query)
     print(keys)
     print(discount_arr)
-    # query_key_sim = softmax(query_key_sim*discount_arr)
-    query_key_sim = tanh(query_key_sim*discount_arr)
+    query_key_sim = softmax(query_key_sim*discount_arr)
+    # query_key_sim = tanh(query_key_sim*discount_arr)
     self.query_key_sim = query_key_sim
     # use similarity to form memory retrieval
     retrieved_memory = tf.matmul(tf.expand_dims(query_key_sim,0),values)
