@@ -119,7 +119,7 @@ class MetaLearner():
     self.yph = tf.placeholder(tf.int32,
                   shape=[None,None],
                   name="ydata_placeholder")
-    self.dropout_keep_pr = tf.placeholder(tf.float32,
+    self.dropout_rate = tf.placeholder(tf.float32,
                   shape=[],
                   name="dropout_ph")
     return None
@@ -134,7 +134,7 @@ class MetaLearner():
     with tf.variable_scope('CELL_SCOPE') as cellscope:
       # setup RNN cell      
       # cell = tf.contrib.rnn.LayerNormBasicLSTMCell(
-      #       self.stsize,dropout_keep_prob=self.dropout_keep_pr)
+      #       self.stsize,dropout_rateob=self.dropout_rate)
       ## input projection
       # [batch,depth,insteps,edim]
       xbatch = tf.layers.dense(xbatch,self.stsize,
@@ -165,19 +165,17 @@ class MetaLearner():
       lstm_layer = tf.keras.layers.RNN(
         lstm_cell,return_sequences=True,return_state=True)
       # layers
-      dropout_inlayer = tf.keras.layers.Dropout(rate=(1-self.dropout_keep_pr))
-      dropout_outlayer = tf.keras.layers.Dropout(rate=(1-self.dropout_keep_pr))
-      dense_inlayer1 = tf.keras.layers.Dense(35,activation='relu')
-      dense_inlayer2 = tf.keras.layers.Dense(self.stsize,activation='relu')
-      dense_outlayer1 = tf.keras.layers.Dense(int(self.stsize/2),activation='relu')
-      dense_outlayer2 = tf.keras.layers.Dense(self.num_actions,activation=None)
-      # forward prop
-      xbatch = dropout_inlayer(dense_inlayer1(xbatch))
-      xbatch = dense_inlayer2(xbatch)
+      dropout_lstmin = tf.keras.layers.Dropout(rate=(self.dropout_rate))
+      dropout_lstmout = tf.keras.layers.Dropout(rate=(self.dropout_rate))
+      dense_inlayer = tf.keras.layers.Dense(self.stsize,activation='relu')
+      dense_outlayer = tf.keras.layers.Dense(self.num_actions,activation=None)
+      # less depth: 1 in + 1 out depth
+      xbatch = dropout_lstmin(dense_inlayer(xbatch))
+      # print('lstm_only+do_inout')
+      # xbatch = dropout_lstmin(xbatch)
       lstm_outputs,final_output,final_state = lstm_layer(xbatch,initial_state=init_state)
-      lstm_outputs = dropout_outlayer(lstm_outputs)
-      outputs = dense_outlayer2(dense_outlayer1(lstm_outputs))
-      print('dropout in and out')
+      self.lstm_outputs = lstm_outputs
+      outputs = dense_outlayer(dropout_lstmout(lstm_outputs))
     return outputs,final_state
 
 
@@ -194,7 +192,7 @@ class Trainer():
   def train_step(self,Xdata,Ydata,cell_state=None):
     feed_dict = { self.net.xph:Xdata,
                   self.net.yph:Ydata,
-                  self.net.dropout_keep_pr:0.9,
+                  self.net.dropout_rate:0.1,
                   }
     # initialize iterator
     self.net.sess.run([self.net.itr_initop],feed_dict)
@@ -252,7 +250,7 @@ class Trainer():
     ## setup
     feed_dict = { self.net.xph:Xdata,
                   self.net.yph:Ydata,
-                  self.net.dropout_keep_pr:1.0,
+                  self.net.dropout_rate:0.0,
                   }
     self.net.sess.run([self.net.itr_initop],feed_dict)
     ## eval
@@ -263,6 +261,18 @@ class Trainer():
                                         ],feed_dict)
     step_acc = step_yhat_sm.argmax(2) == step_ybatch.argmax(2)
     return step_acc
+
+  def unroll_states(self,Xdata):
+    ## setup
+    feed_dict = { self.net.xph:Xdata,
+                  self.net.yph:Xdata,
+                  self.net.dropout_rate:0.0,
+                  }
+    self.net.sess.run([self.net.itr_initop],feed_dict)
+    ## eval
+    lstm_outputs = self.net.sess.run(self.net.lstm_outputs,feed_dict)
+    return lstm_outputs
+
 
   def eval_loop(self,num_itr,trials_per_episode=None,task_flag=None):
     if trials_per_episode==None:
