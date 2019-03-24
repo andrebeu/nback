@@ -1,0 +1,2 @@
+model_checkpoint_path: "lstm_10-nback_4-ogtokens_3-pmtrials_10-seed_1-trepochs_2500-eval_acc"
+all_model_checkpoint_paths: "lstm_10-nback_4-ogtokens_3-pmtrials_10-seed_1-trepochs_2500-eval_acc"
