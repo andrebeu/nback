@@ -30,32 +30,32 @@ NBACK = 2
 #     return T,X,Y
 
 
-NSTIM = 3
-NTRIALS = 4
-class ToyNBackTask2():
-  """ 2back on 4 trials with 3 stim """
+# NSTIM = 3
+# NTRIALS = 4
+# class ToyNBackTask2():
+#   """ 2back on 4 trials with 3 stim """
   
-  def __init__(self,nback=NBACK):
-    self.nback = nback
-    return None
+#   def __init__(self,nback=NBACK):
+#     self.nback = nback
+#     return None
 
-  def genseq(self):
-    seq1 = np.random.choice([0,1,2],2,replace=False)
-    np.random.shuffle(seq1)
-    seq2 = np.random.choice([0,1,2],2,replace=False)
-    np.random.shuffle(seq2)
-    seq = np.concatenate([seq1,seq2])
-    seqroll = seq == np.roll(seq,2)
-    seqroll[:2] = 0
-    T = np.expand_dims(np.arange(4),0)
-    X = np.expand_dims(seq,0)
-    Y = np.expand_dims(seqroll.astype(int),0)
-    return T,X,Y
+#   def genseq(self):
+#     seq1 = np.random.choice([0,1,2],2,replace=False)
+#     np.random.shuffle(seq1)
+#     seq2 = np.random.choice([0,1,2],2,replace=False)
+#     np.random.shuffle(seq2)
+#     seq = np.concatenate([seq1,seq2])
+#     seqroll = seq == np.roll(seq,2)
+#     seqroll[:2] = 0
+#     T = np.expand_dims(np.arange(4),0)
+#     X = np.expand_dims(seq,0)
+#     Y = np.expand_dims(seqroll.astype(int),0)
+#     return T,X,Y
 
 
 NSTIM = 3
 NTRIALS = 5
-class ToyNBackTask3():
+class NBackTask():
   
   def __init__(self,nback=2,nstim=NSTIM):
     self.nback = nback
@@ -80,7 +80,7 @@ Feed forward network with an HD
 
 class PureEM():
 
-  def __init__(self,nback=NBACK,nstim=NSTIM,ntrials=NTRIALS,dim=15):
+  def __init__(self,nback=NBACK,nstim=NSTIM,ntrials=NTRIALS,dim=5):
     self.nback = nback
     self.nstim = nstim
     self.ntrials = ntrials
@@ -98,9 +98,9 @@ class PureEM():
       self.context,self.stim = self.trial_embed,self.stim_embed
       # init memory mat
       response_layer1 = tf.keras.layers.Dense(self.dim,activation='relu')
-
+      response_dropout = tf.layers.Dropout(.9)
       response_layer2 = tf.keras.layers.Dense(2,activation=None)
-      self.response_layer = lambda x: response_layer2(response_layer1(x))
+      self.response_layer = lambda x: response_layer2(response_dropout(response_layer1(x)))
       # unroll
       self.response_logits = self.unroll_trial(self.stim,self.context)
       self.y_hot = tf.one_hot(self.y_ph[:,self.nback:],2)
@@ -127,6 +127,7 @@ class PureEM():
     trial_ph = tf.placeholder(name='trial_ph',shape=[1,self.ntrials],dtype=tf.int32)
     stim_ph = tf.placeholder(name='stim_ph',shape=[1,self.ntrials],dtype=tf.int32)
     y_ph = tf.placeholder(name='true_y_ph',shape=[1,self.ntrials],dtype=tf.int32)
+    self.dropout = tf.placeholder(name='dropout_ph',shape=[],dtype=tf.float32)
     return trial_ph,stim_ph,y_ph
 
 
@@ -158,12 +159,11 @@ class PureEM():
       context_t = context[:,tstep,:]
       # retrieve memory using stim
       retrieved_context_t = self.retrieve_memory(stim_t)
-      self.retrieved_context_t = retrieved_context_t
       # compute response
-      response_in = tf.concat([context_t,retrieved_context_t],axis=-1)
-      response_t = self.response_layer(response_in)
+      self.response_in = tf.concat([context_t,retrieved_context_t],axis=-1)
+      response_t = self.response_layer(self.response_in)
       yL.append(response_t)
-      # write to memory
+      # write to memory (concat new stim to bottom)
       self.M_keys = tf.concat([self.M_keys,stim_t],
                       axis=0,name='M_keys_write') # [memory_idx,dim]
       self.M_values = tf.concat([self.M_values,context_t],
@@ -172,7 +172,7 @@ class PureEM():
     return response_logits
 
 
-  def retrieve_memory(self,query,sm_temp=10,discount_rate=0.9):
+  def retrieve_memory(self,query,temp=1,discount_rate=0.9,discount_type='nback'):
     """
     NB online works in online mode 
       matmul operation cannot handle 3D tensors [batch,key,dim]
@@ -181,19 +181,23 @@ class PureEM():
     values = self.M_values
     # form retrieval similarity vector
     query_key_sim = 1-tf.keras.metrics.cosine(query,keys)
-    sm_sim = lambda x: tf.exp(sm_temp*x)/tf.reduce_sum(tf.exp(sm_temp*x),axis=0)
-    discount_arr = [discount_rate**np.abs(self.nback-i-1) for i in range(keys.shape[0])] # take nback into account
-    # discount_arr = [discount_rate**i for i in range(keys.shape[0])] # slightly less cheating
+    softmax = lambda x: tf.exp(temp*x)/tf.reduce_sum(tf.exp(temp*x),axis=0)
+    tanh = lambda x: tf.tanh(temp*x)/tf.reduce_sum(tf.tanh(temp*x),axis=0)
+    # tanh = lambda x: tf.tanh(temp*x)
+    if discount_type=='nback':
+      discount_arr = [discount_rate**np.abs(i-1) for i in range(keys.shape[0])] 
+    else:
+      discount_arr = [discount_rate**i for i in range(keys.shape[0])] # slightly less cheating
+    discount_arr.reverse()
+    print(query)
+    print(keys)
     print(discount_arr)
-    query_key_sim = sm_sim(query_key_sim*discount_arr)
+    # query_key_sim = softmax(query_key_sim*discount_arr)
+    query_key_sim = tanh(query_key_sim*discount_arr)
     self.query_key_sim = query_key_sim
     # use similarity to form memory retrieval
-    retrieved_memory_ = tf.transpose(
-                        tf.matmul(
-                          values,tf.expand_dims(query_key_sim,0),
-                          transpose_a=True,transpose_b=True
-                        ))
     retrieved_memory = tf.matmul(tf.expand_dims(query_key_sim,0),values)
+    self.retrieved_memory = retrieved_memory
     return retrieved_memory
 
   def write_to_memory(self,trial_num,key,value):
