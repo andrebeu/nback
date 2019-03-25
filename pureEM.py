@@ -5,20 +5,21 @@ import numpy as np
 it is important to choose appropriate initializers for the M_keys 
   otherwise everything will be too similar on the similarity-based lookup 
   also, using softmax with higher temperature seems to help
+
+moving the discount factor out of the softmax worsens performance
 """
 
 NBACK = 2
-NSTIM = 3
-NTRIALS = 5
+
 
 class NBackTask():
   
-  def __init__(self,nback=2,nstim=NSTIM):
+  def __init__(self,nstim,nback=NBACK):
     self.nback = nback
     self.nstim = nstim
     return None
 
-  def genseq(self,ntrials=NTRIALS):
+  def genseq(self,ntrials):
     seq = np.random.randint(0,self.nstim,ntrials)
     seqroll = np.roll(seq,2)
     X = np.expand_dims(seq,0)
@@ -36,7 +37,7 @@ Feed forward network with an HD
 
 class PureEM():
 
-  def __init__(self,nback=NBACK,nstim=NSTIM,ntrials=NTRIALS,dim=25):
+  def __init__(self,nstim,ntrials,dim=25,nback=NBACK):
     self.nback = nback
     self.nstim = nstim
     self.ntrials = ntrials
@@ -130,7 +131,7 @@ class PureEM():
 
   def retrieve_memory(self,query,temp=6,discount_rate=0.9,discount_type='decaying'):
     """
-    NB online works in online mode 
+    NB works in online mode 
       matmul operation cannot handle 3D tensors [batch,key,dim]
     """
     keys = self.M_keys
