@@ -7,6 +7,8 @@ it is important to choose appropriate initializers for the M_keys
   also, using softmax with higher temperature seems to help
 
 moving the discount factor out of the softmax worsens performance
+
+larger embed sizes easier to learn, indepth helps regardless of edim
 """
 
 NBACK = 2
@@ -14,20 +16,51 @@ NBACK = 2
 
 class NBackTask():
   
-  def __init__(self,nstim,nback=NBACK):
+  def __init__(self,nstim,ntrials,nback=NBACK,flip_pr=.35):
+    """ 
+    flip_pr controls how many of the stimuli in the 
+      sequence will be flipped into a positive response trial
+      this param controls chance level
+    """
     self.nback = nback
     self.nstim = nstim
+    self.ntrials = ntrials
+    self.flip_pr = flip_pr
+    self.sim_chance()
     return None
 
-  def genseq(self,ntrials):
-    seq = np.random.randint(0,self.nstim,ntrials)
-    seqroll = np.roll(seq,2)
+  def gen_episode(self):
+    """ 
+    """
+    seq = self.genseq_balanced_flip()
+    seqroll = np.roll(seq,self.nback)
     X = np.expand_dims(seq,0)
     Y = (seqroll==seq).astype(int)
     Y[:self.nback] = 0
     Y = np.expand_dims(Y,0)
-    T = np.expand_dims(np.arange(ntrials),0)
+    T = np.expand_dims(np.arange(self.ntrials),0)
     return T,X,Y
+
+  def genseq_balanced_flip(self):
+    # generate sequence
+    seq = np.random.randint(0,self.nstim,self.ntrials)
+    # flip true trials 
+    # adjusted_flip_pr = self.flip_pr - self.flip_pr*(1/self.ntrials)
+    true_nback_idx = np.where(np.random.binomial(1,self.flip_pr,self.ntrials-self.nback))[0] + self.nback
+    for idx in true_nback_idx:
+      seq[idx] = seq[idx-self.nback]
+    return seq
+
+  def genseq_unbalanced(self):
+    seq = np.random.randint(0,self.nstim,self.ntrials)
+    return seq
+
+  def sim_chance(self):
+    L = []
+    for i in range(1000):
+      T,X,Y = self.gen_episode()
+      L.append(Y.sum()/Y.shape[1])
+    print("-- proportion of true trials: M=%.2f S=%.2f"%(np.mean(L),np.std(L)))
 
 
 """ 
@@ -37,11 +70,12 @@ Feed forward network with an HD
 
 class PureEM():
 
-  def __init__(self,nstim,ntrials,dim=25,nback=NBACK):
+  def __init__(self,nstim,ntrials,dim=25,edim=25,nback=NBACK):
     self.nback = nback
     self.nstim = nstim
     self.ntrials = ntrials
     self.dim = dim
+    self.edim = edim
     self.graph = tf.Graph()
     self.sess = tf.Session(graph=self.graph)
     self.build()
@@ -52,11 +86,13 @@ class PureEM():
       ## model inputs
       self.trial_ph,self.stim_ph,self.y_ph = self.setup_placeholders()
       self.trial_embed,self.stim_embed = self.get_input_embeds(self.trial_ph,self.stim_ph)
-      self.context,self.stim = self.trial_embed,self.stim_embed
+      # self.context = tf.keras.layers.Dense(self.dim,activation='relu')(self.trial_embed)
+      self.stim = tf.keras.layers.Dense(self.dim,activation='relu')(self.stim_embed)
+      self.context = self.trial_embed
       # response layer
       response_layer1 = tf.keras.layers.Dense(self.dim,activation='relu')
-      response_dropout = tf.layers.Dropout(.9)
       response_layer2 = tf.keras.layers.Dense(2,activation=None)
+      response_dropout = tf.layers.Dropout(.9)
       self.response_layer = lambda x: response_layer2(response_dropout(response_layer1(x)))
       # unroll
       self.response_logits = self.unroll_trial(self.stim,self.context)
@@ -89,20 +125,29 @@ class PureEM():
 
 
   def get_input_embeds(self,trial_ph,stim_ph):
+    print('-- triu1 context not trainable')
     # setup emat
-    self.trial_emat = tf.get_variable(
-          name='trial_emat',
-          shape=[self.ntrials,self.dim],
-          trainable=True,
-          initializer=tf.initializers.glorot_normal) 
+    # self.trial_emat = tf.get_variable(
+    #       name='trial_emat',
+    #       shape=[self.ntrials,self.edim],
+    #       trainable=False,
+    #       initializer=tf.initializers.identity) 
+    self.trial_emat = tf.convert_to_tensor(
+                        np.triu(np.ones([self.ntrials,self.ntrials])),
+                        dtype=tf.float32)
+    # self.trial_emat = tf.convert_to_tensor(
+    #                     np.identity(self.ntrials),
+    #                     dtype=tf.float32)
     self.stim_emat = tf.get_variable(
           name='stim_emat',
-          shape=[self.nstim,self.dim],
+          shape=[self.nstim,self.edim],
           trainable=True,
           initializer=tf.initializers.glorot_normal)
     # lookup
     trial_embed = tf.nn.embedding_lookup(self.trial_emat,self.trial_ph,name='trial_embed')
     stim_embed = tf.nn.embedding_lookup(self.stim_emat,self.stim_ph,name='stim_embed')
+    # randomizer
+    
     return trial_embed,stim_embed
 
 
@@ -139,18 +184,12 @@ class PureEM():
     # form retrieval similarity vector
     query_key_sim = 1-tf.keras.metrics.cosine(query,keys)
     softmax = lambda x: tf.exp(temp*x)/tf.reduce_sum(tf.exp(temp*x),axis=0)
-    # tanh = lambda x: tf.tanh(temp*x)/tf.reduce_sum(tf.tanh(temp*x),axis=0)
-    # tanh = lambda x: tf.tanh(temp*x)
     if discount_type=='nback':
       discount_arr = [discount_rate**np.abs(i-1) for i in range(keys.shape[0])] 
     elif discount_type=='decaying': 
       discount_arr = [discount_rate**i for i in range(keys.shape[0])] 
     discount_arr.reverse()
-    print(query)
-    print(keys)
-    print(discount_arr)
     query_key_sim = softmax(query_key_sim*discount_arr)
-    # query_key_sim = tanh(query_key_sim*discount_arr)
     self.query_key_sim = query_key_sim
     # use similarity to form memory retrieval
     retrieved_memory = tf.matmul(tf.expand_dims(query_key_sim,0),values)
