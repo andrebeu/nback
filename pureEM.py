@@ -8,53 +8,9 @@ it is important to choose appropriate initializers for the M_keys
 """
 
 NBACK = 2
-
-
-# NSTIM = 2
-# NTRIALS = 3
-# class ToyNBackTask1():
-  
-#   def __init__(self,nback=NBACK):
-#     self.nback = nback
-#     return None
-
-#   def genseq(self,ntrials=NTRIALS):
-#     seq = np.array([0,1])
-#     np.random.shuffle(seq)
-#     seq = np.concatenate([seq,[0]])
-#     seqroll = seq == np.roll(seq,self.nback)
-#     seqroll[:self.nback] = 0
-#     T = np.expand_dims(np.arange(ntrials),0)
-#     X = np.expand_dims(seq,0)
-#     Y = np.expand_dims(seqroll.astype(int),0)
-#     return T,X,Y
-
-
-# NSTIM = 3
-# NTRIALS = 4
-# class ToyNBackTask2():
-#   """ 2back on 4 trials with 3 stim """
-  
-#   def __init__(self,nback=NBACK):
-#     self.nback = nback
-#     return None
-
-#   def genseq(self):
-#     seq1 = np.random.choice([0,1,2],2,replace=False)
-#     np.random.shuffle(seq1)
-#     seq2 = np.random.choice([0,1,2],2,replace=False)
-#     np.random.shuffle(seq2)
-#     seq = np.concatenate([seq1,seq2])
-#     seqroll = seq == np.roll(seq,2)
-#     seqroll[:2] = 0
-#     T = np.expand_dims(np.arange(4),0)
-#     X = np.expand_dims(seq,0)
-#     Y = np.expand_dims(seqroll.astype(int),0)
-#     return T,X,Y
-
-
 NSTIM = 3
 NTRIALS = 5
+
 class NBackTask():
   
   def __init__(self,nback=2,nstim=NSTIM):
@@ -96,7 +52,7 @@ class PureEM():
       self.trial_ph,self.stim_ph,self.y_ph = self.setup_placeholders()
       self.trial_embed,self.stim_embed = self.get_input_embeds(self.trial_ph,self.stim_ph)
       self.context,self.stim = self.trial_embed,self.stim_embed
-      # init memory mat
+      # response layer
       response_layer1 = tf.keras.layers.Dense(self.dim,activation='relu')
       response_dropout = tf.layers.Dropout(.9)
       response_layer2 = tf.keras.layers.Dense(2,activation=None)
@@ -150,10 +106,10 @@ class PureEM():
 
 
   def unroll_trial(self,stim,context):
-    # pre-load memory matrix
+    # pre-load memory matrix with nback items
     self.M_keys = stim[0,:self.nback,:] # NB online mode 
     self.M_values = context[0,:self.nback,:]
-    yL = []
+    respL = []
     for tstep in range(self.nback,self.ntrials):
       stim_t = stim[:,tstep,:]
       context_t = context[:,tstep,:]
@@ -162,13 +118,13 @@ class PureEM():
       # compute response
       self.response_in = tf.concat([context_t,retrieved_context_t],axis=-1)
       response_t = self.response_layer(self.response_in)
-      yL.append(response_t)
+      respL.append(response_t)
       # write to memory (concat new stim to bottom)
       self.M_keys = tf.concat([self.M_keys,stim_t],
                       axis=0,name='M_keys_write') # [memory_idx,dim]
       self.M_values = tf.concat([self.M_values,context_t],
                       axis=0,name='M_values_write')
-    response_logits = tf.stack(yL,axis=1,name='response_logits')
+    response_logits = tf.stack(respL,axis=1,name='response_logits')
     return response_logits
 
 
@@ -200,11 +156,5 @@ class PureEM():
     self.retrieved_memory = retrieved_memory
     return retrieved_memory
 
-  def write_to_memory(self,trial_num,key,value):
-    return None
 
-  def get_memory_mats(self):
-    """ {self.stim: trial_embed}
-    """
-    return None
 
