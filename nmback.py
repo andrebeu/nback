@@ -61,7 +61,15 @@ class MetaLearner():
       self.xbatch_id,self.ybatch_id,self.itr_initop = self.data_pipeline() 
       # embedding matrix and randomization op
       self.stim_emat = tf.get_variable('stimulus_embedding_matrix',[self.nstim,self.edim],
-                        trainable=False,initializer=tf.initializers.random_normal(0,1)) 
+                        trainable=False,initializer=tf.initializers.random_uniform(-1,1))
+      ##
+      # self.stim_emat_U = tf.get_variable('stimulus_embedding_matrix0',[int(self.nstim/2),self.edim],
+      #                   trainable=False,initializer=tf.initializers.random_uniform(-1,1)) 
+      # self.stim_emat_N = tf.get_variable('stimulus_embedding_matrix1',[int(self.nstim/2)+1,self.edim],
+      #                   trainable=False,initializer=tf.initializers.random_normal(0,1)) 
+      # self.stim_emat = tf.concat([self.stim_emat_U,self.stim_emat_N],0)
+      # self.randomize_stim_emat = tf.group([self.stim_emat_U.initializer,self.stim_emat_N.initializer])
+      ##
       self.task_emat = tf.get_variable('task_embedding_matrix',[2,self.edim],
                         trainable=True,initializer=tf.initializers.random_normal(0,1)) 
       self.emat = tf.concat([self.task_emat,self.stim_emat],0)
@@ -76,12 +84,7 @@ class MetaLearner():
                           logits=self.yhat_unscaled)
       self.minimizer = tf.train.AdamOptimizer(0.001).minimize(self.train_loss)
       ## eval
-      self.yhat_sm = tf.nn.softmax(self.yhat_unscaled) 
-      # self.acc = tf.equal(self.ybatch_id,tf.argmax(self.yhat_sm,2,output_type=tf.int32))
-      # self.acc = tf.metrics.accuracy(
-      #             labels=self.ybatch_id,
-      #             predictions=tf.argmax(self.yhat_sm,2))
-      
+      self.yhat_sm = tf.nn.softmax(self.yhat_unscaled)       
       # other
       self.sess.run(tf.global_variables_initializer())
       self.saver_op = tf.train.Saver(max_to_keep=None)
@@ -179,8 +182,6 @@ class MetaLearner():
     return outputs,final_state
 
 
-
-
 class Trainer():
 
   def __init__(self,net,nback,mback,trials_per_episode=50):
@@ -272,7 +273,6 @@ class Trainer():
     ## eval
     lstm_outputs = self.net.sess.run(self.net.lstm_outputs,feed_dict)
     return lstm_outputs
-
 
   def eval_loop(self,num_itr,trials_per_episode=None,task_flag=None):
     if trials_per_episode==None:
