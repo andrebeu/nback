@@ -147,7 +147,6 @@ class PureEM():
     trial_embed = tf.nn.embedding_lookup(self.trial_emat,self.trial_ph,name='trial_embed')
     stim_embed = tf.nn.embedding_lookup(self.stim_emat,self.stim_ph,name='stim_embed')
     # randomizer
-    
     return trial_embed,stim_embed
 
 
