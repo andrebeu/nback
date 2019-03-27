@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 
 """ 
-it is important to choose appropriate initializers for the M_keys 
+it is important to choose appropriate initializers for the Mkeys 
   otherwise everything will be too similar on the similarity-based lookup 
   also, using softmax with higher temperature seems to help
 
@@ -74,8 +74,7 @@ Feed forward network with an HD
 
 class PureEM():
 
-  def __init__(self,nstim,ntrials,dim=25,stim_edim=25,context_edim=25,
-                  discount_rate=0.9,memory_temp=6,nback=NBACK):
+  def __init__(self,nstim,ntrials,dim=25,stim_edim=25,context_edim=25,nback=NBACK):
     # task
     self.nback = nback
     self.nstim = nstim
@@ -84,8 +83,7 @@ class PureEM():
     self.dim = dim
     self.stim_edim = stim_edim
     self.context_edim = context_edim
-    self.discount_rate = discount_rate
-    self.memory_temp = memory_temp
+    self.memory_thresh = .8
     # graph
     self.graph = tf.Graph()
     self.sess = tf.Session(graph=self.graph)
@@ -97,25 +95,16 @@ class PureEM():
       ## inputs
       self.placeholders()
       self.context_embed,self.stim_embed = self.input_embeds()
-      # self.context = tf.keras.layers.Dense(self.dim,activation='relu')(self.context_embed)
-      print('no inproj, relus')
-      # self.stim = tf.keras.layers.Dense(self.dim,activation='relu')(self.stim_embed)
       self.context = self.context_embed
       self.stim = self.stim_embed
-      # response layer
-      layer1 = tf.keras.layers.Dense(self.dim,activation='relu')
-      dropout1 = tf.keras.layers.Dropout(rate=.1)
-      layer2 = tf.keras.layers.Dense(self.dim,activation='relu')
-      dropout2 = tf.keras.layers.Dropout(rate=.1)
-      layer_out = tf.keras.layers.Dense(2,activation=None)
-      self.response_net = lambda x: layer_out(dropout2(layer2(dropout1(layer1(x)))))
+      # self.context = tf.keras.layers.Dense(self.dim,activation='relu')(self.context_embed)
+      # self.stim = tf.keras.layers.Dense(self.dim,activation='relu')(self.stim_embed)
       # unroll
       self.response_logits = self.unroll_trial(self.stim,self.context)
       ## loss and optimization
       self.y_hot = tf.one_hot(self.y_ph[:,self.nback:],2)
       self.train_loss = tf.nn.softmax_cross_entropy_with_logits_v2(
-                          labels=self.y_hot,
-                          logits=self.response_logits)
+                          labels=self.y_hot,logits=self.response_logits)
       self.minimizer = tf.train.AdamOptimizer(0.001).minimize(self.train_loss)
       ## eval
       self.response_sm = tf.nn.softmax(self.response_logits)
@@ -139,7 +128,6 @@ class PureEM():
     return None
 
   def input_embeds(self):
-    print('gU init, notrain')
     self.stim_emat = tf.get_variable(
           name='stim_emat',
           shape=[self.nstim,self.stim_edim],
@@ -152,45 +140,84 @@ class PureEM():
 
   def unroll_trial(self,stim,context):
     # pre-load memory matrix with nback items
-    self.M_keys = stim[0,:self.nback,:] # NB online mode 
-    self.M_values = context[0,:self.nback,:]
-    respL = []
+    self.Mkeys = stim[0,:self.nback,:] # NB online mode 
+    self.Mvalues = context[0,:self.nback,:]
+    lstm_output_L = []
     self.respinL = []
     self.qksimL = []
-    for tstep in range(self.nback,self.ntrials):
-      # trial input
-      stim_t = stim[:,tstep,:]
-      context_t = context[:,tstep,:]
-      # retrieve memory using stim
-      retrieved_context_t,qksim_t = self.retrieve_memory(stim_t)
-      self.qksimL.append(qksim_t)
-      # compute response
-      resp_input = tf.concat([context_t,retrieved_context_t],axis=-1)
-      self.respinL.append(tf.squeeze(resp_input))
-      response_t = self.response_net(resp_input)
-      respL.append(response_t)
-      # write to memory (concat new stim to bottom)
-      self.M_keys = tf.concat([self.M_keys,stim_t],
-                      axis=0,name='M_keys_write') # [memory_idx,dim]
-      self.M_values = tf.concat([self.M_values,context_t],
-                      axis=0,name='M_values_write')
-    # outputs
-    response_logits = tf.stack(respL,axis=1,name='response_logits')
+    self.retrieved_contextsL = []
+    with tf.variable_scope('CELL_SCOPE') as cellscope:
+      # initialize lstm
+      print('non-trainable zero init')
+      init_state_var = tf.get_variable('init_state',
+                          shape=[1,self.dim],trainable=True,
+                          initializer=tf.initializers.glorot_normal(0,1)
+                          ) 
+      lstm_cell = tf.keras.layers.LSTMCell(self.dim)
+      init_state = lstm_cell.get_initial_state(init_state_var)
+      lstm_layer = tf.keras.layers.RNN(lstm_cell,return_sequences=False,return_state=False)
+      ##
+      retrieve_null = False
+      feed_context_to_lstm = False
+      feed_context_to_out = True
+      ##
+      # unroll trial
+      for tstep in range(self.nback,self.ntrials):
+        # if tstep > 0: cellscope.reuse_variables()
+        # trial input
+        stim_t = stim[:,tstep,:]
+        context_t = context[:,tstep,:]
+        # retrieve memory using stim
+        retrieved_contexts,qksim_t = self.retrieve_memoryL(stim_t,self.memory_thresh,retrieve_null)
+        self.qksimL.append(qksim_t)
+        self.retrieved_contextsL.append(retrieved_contexts)
+        # LSTM readout
+        if feed_context_to_lstm:
+          lstm_in = tf.concat([tf.expand_dims(context_t,1),retrieved_contexts],1)
+        else:
+          lstm_in = tf.concat([tf.zeros([1,1,self.context_edim]),retrieved_contexts],1)
+        # lstm_in = retrieved_contexts
+        lstm_output = lstm_layer(lstm_in,initial_state=init_state)
+        lstm_output_L.append(lstm_output)
+        # write to memory (concat new stim to bottom)
+        self.Mkeys = tf.concat([self.Mkeys,stim_t],
+                        axis=0,name='Mkeys_write') # [memory_idx,dim]
+        self.Mvalues = tf.concat([self.Mvalues,context_t],
+                        axis=0,name='Mvalues_write')
+      # output projection to logits space
+      lstm_outputs = tf.stack(lstm_output_L,axis=1,name='response_logits')
+      if feed_context_to_out:
+        response_in = tf.concat([lstm_outputs,context[:,self.nback:,:]],-1)
+        response_in = tf.keras.layers.Dense(self.dim,activation='relu')(response_in)
+      else:
+        response_in = lstm_outputs
+      response_logits = tf.keras.layers.Dense(2,activation=None)(response_in)
     return response_logits
 
-  def retrieve_memory(self,query):
+  def retrieve_memoryL(self,query,qksim_thresh,retrieve_null):
     """
-    """
-    keys = self.M_keys
-    values = self.M_values
-    # setup
-    softmax = lambda x: tf.exp(self.memory_temp*x)/tf.reduce_sum(tf.exp(self.memory_temp*x),axis=0) 
-    discount_arr = [self.discount_rate**i for i in range(keys.shape[0])] 
-    discount_arr.reverse()
-    # form retrieval similarity vector
-    qksim = 1-tf.keras.metrics.cosine(query,keys) # query-key similarity
-    qksim = softmax(qksim*discount_arr)
-    # use similarity to form memory retrieval
-    retrieved_memory = tf.matmul(tf.expand_dims(qksim,0),values)
-    return retrieved_memory,qksim
+    returns a list of memory vectors 
+      for which the similarity of query-key exceeds threshold
+
+    """ 
+    Mkeys = self.Mkeys
+    Mvalues = self.Mvalues
+    
+    qksim_arr = -tf.keras.metrics.cosine(query,Mkeys) 
+    
+    memoryL = []
+    zeros = tf.zeros([1,self.context_edim])
+    for m_i in range(qksim_arr.shape[0]):
+      if retrieve_null:
+        memory_i = tf.cond(qksim_arr[m_i] > qksim_thresh, 
+                      true_fn=lambda: Mvalues[m_i,:], 
+                      false_fn=lambda: 0*Mvalues[m_i,:])
+        memoryL.append(memory_i)
+        retrieved_contexts = tf.stack(memoryL,axis=0)
+      else:
+        retrieved_contexts = tf.boolean_mask(Mvalues,qksim_arr>qksim_thresh,axis=0)
+
+    retrieved_contexts = tf.expand_dims(retrieved_contexts,axis=0)
+    return retrieved_contexts,qksim_arr
+
 
