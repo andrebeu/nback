@@ -151,7 +151,8 @@ class PureEM():
       print('non-trainable zero init')
       init_state_var = tf.get_variable('init_state',
                           shape=[1,self.dim],trainable=True,
-                          initializer=tf.initializers.glorot_normal(0,1)
+                          # initializer=tf.initializers.glorot_normal(0,1)
+                          initializer=tf.initializers.zeros()
                           ) 
       lstm_cell = tf.keras.layers.LSTMCell(self.dim)
       init_state = lstm_cell.get_initial_state(init_state_var)
@@ -160,6 +161,11 @@ class PureEM():
       retrieve_null = False
       feed_context_to_lstm = False
       feed_context_to_out = True
+      print(
+        'retrieve_null',retrieve_null,
+        'feed_context_to_lstm',feed_context_to_lstm,
+        'feed_context_to_out',feed_context_to_out
+        )
       ##
       # unroll trial
       for tstep in range(self.nback,self.ntrials):
