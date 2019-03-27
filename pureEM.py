@@ -15,7 +15,7 @@ NBACK = 2
 
 
 class NBackTask():
-  
+
   def __init__(self,nstim,ntrials,nback=NBACK,flip_pr=.35):
     """ 
     flip_pr controls how many of the stimuli in the 
@@ -29,16 +29,20 @@ class NBackTask():
     self.sim_chance()
     return None
 
-  def gen_episode(self):
+  def gen_episode_data(self):
     """ 
     """
     seq = self.genseq_balanced_flip()
+    T,X,Y = self.format_seq_into_dataset(seq)
+    return T,X,Y
+
+  def format_seq_into_dataset(self,seq):
     seqroll = np.roll(seq,self.nback)
     X = np.expand_dims(seq,0)
     Y = (seqroll==seq).astype(int)
     Y[:self.nback] = 0
     Y = np.expand_dims(Y,0)
-    T = np.expand_dims(np.arange(self.ntrials),0)
+    T = np.expand_dims(np.arange(len(seq)),0)
     return T,X,Y
 
   def genseq_balanced_flip(self):
@@ -58,7 +62,7 @@ class NBackTask():
   def sim_chance(self):
     L = []
     for i in range(1000):
-      T,X,Y = self.gen_episode()
+      T,X,Y = self.gen_episode_data()
       L.append(Y.sum()/Y.shape[1])
     print("-- proportion of true trials: M=%.2f S=%.2f"%(np.mean(L),np.std(L)))
 
@@ -70,8 +74,9 @@ Feed forward network with an HD
 
 class PureEM():
 
-  def __init__(self,nstim,ntrials,dim=25,stim_edim=25,context_edim=25,discount_rate=0.9,nback=NBACK):
-  	# task
+  def __init__(self,nstim,ntrials,dim=25,stim_edim=25,context_edim=25,
+                  discount_rate=0.9,memory_temp=6,nback=NBACK):
+    # task
     self.nback = nback
     self.nstim = nstim
     self.ntrials = ntrials
@@ -80,6 +85,7 @@ class PureEM():
     self.stim_edim = stim_edim
     self.context_edim = context_edim
     self.discount_rate = discount_rate
+    self.memory_temp = memory_temp
     # graph
     self.graph = tf.Graph()
     self.sess = tf.Session(graph=self.graph)
@@ -91,13 +97,18 @@ class PureEM():
       ## inputs
       self.placeholders()
       self.context_embed,self.stim_embed = self.input_embeds()
-      self.stim = tf.keras.layers.Dense(self.dim,activation='relu')(self.stim_embed)
+      # self.context = tf.keras.layers.Dense(self.dim,activation='relu')(self.context_embed)
+      print('no inproj, relus')
+      # self.stim = tf.keras.layers.Dense(self.dim,activation='relu')(self.stim_embed)
       self.context = self.context_embed
+      self.stim = self.stim_embed
       # response layer
-      response_layer1 = tf.keras.layers.Dense(self.dim,activation='relu')
-      response_layer2 = tf.keras.layers.Dense(2,activation=None)
-      response_dropout = tf.layers.Dropout(.9)
-      self.response_layer = lambda x: response_layer2(response_dropout(response_layer1(x)))
+      layer1 = tf.keras.layers.Dense(self.dim,activation='relu')
+      dropout1 = tf.keras.layers.Dropout(rate=.1)
+      layer2 = tf.keras.layers.Dense(self.dim,activation='relu')
+      dropout2 = tf.keras.layers.Dropout(rate=.1)
+      layer_out = tf.keras.layers.Dense(2,activation=None)
+      self.response_net = lambda x: layer_out(dropout2(layer2(dropout1(layer1(x)))))
       # unroll
       self.response_logits = self.unroll_trial(self.stim,self.context)
       ## loss and optimization
@@ -128,12 +139,12 @@ class PureEM():
     return None
 
   def input_embeds(self):
+    print('gU init, notrain')
     self.stim_emat = tf.get_variable(
           name='stim_emat',
           shape=[self.nstim,self.stim_edim],
           trainable=False,
-          initializer=tf.initializers.glorot_normal)
-    print('semat untrainable')
+          initializer=tf.initializers.orthogonal)
     # lookup
     context_embed = tf.nn.embedding_lookup(self.context_emat_ph,self.trial_ph,name='context_embed')
     stim_embed = tf.nn.embedding_lookup(self.stim_emat,self.stim_ph,name='stim_embed')
@@ -144,42 +155,42 @@ class PureEM():
     self.M_keys = stim[0,:self.nback,:] # NB online mode 
     self.M_values = context[0,:self.nback,:]
     respL = []
+    self.respinL = []
+    self.qksimL = []
     for tstep in range(self.nback,self.ntrials):
+      # trial input
       stim_t = stim[:,tstep,:]
       context_t = context[:,tstep,:]
       # retrieve memory using stim
-      retrieved_context_t = self.retrieve_memory(stim_t)
+      retrieved_context_t,qksim_t = self.retrieve_memory(stim_t)
+      self.qksimL.append(qksim_t)
       # compute response
-      self.response_in = tf.concat([context_t,retrieved_context_t],axis=-1)
-      response_t = self.response_layer(self.response_in)
+      resp_input = tf.concat([context_t,retrieved_context_t],axis=-1)
+      self.respinL.append(tf.squeeze(resp_input))
+      response_t = self.response_net(resp_input)
       respL.append(response_t)
       # write to memory (concat new stim to bottom)
       self.M_keys = tf.concat([self.M_keys,stim_t],
                       axis=0,name='M_keys_write') # [memory_idx,dim]
       self.M_values = tf.concat([self.M_values,context_t],
                       axis=0,name='M_values_write')
+    # outputs
     response_logits = tf.stack(respL,axis=1,name='response_logits')
     return response_logits
 
-  def retrieve_memory(self,query,temp=6):
+  def retrieve_memory(self,query):
     """
-    NB works in online mode 
-      matmul operation cannot handle 3D tensors [batch,key,dim]
     """
     keys = self.M_keys
     values = self.M_values
     # setup
-    softmax = lambda x: tf.exp(temp*x)/tf.reduce_sum(tf.exp(temp*x),axis=0) 
+    softmax = lambda x: tf.exp(self.memory_temp*x)/tf.reduce_sum(tf.exp(self.memory_temp*x),axis=0) 
     discount_arr = [self.discount_rate**i for i in range(keys.shape[0])] 
     discount_arr.reverse()
     # form retrieval similarity vector
-    query_key_sim = 1-tf.keras.metrics.cosine(query,keys)
-    query_key_sim = softmax(query_key_sim*discount_arr)
-    self.query_key_sim = query_key_sim
+    qksim = 1-tf.keras.metrics.cosine(query,keys) # query-key similarity
+    qksim = softmax(qksim*discount_arr)
     # use similarity to form memory retrieval
-    retrieved_memory = tf.matmul(tf.expand_dims(query_key_sim,0),values)
-    self.retrieved_memory = retrieved_memory
-    return retrieved_memory
-
-
+    retrieved_memory = tf.matmul(tf.expand_dims(qksim,0),values)
+    return retrieved_memory,qksim
 
