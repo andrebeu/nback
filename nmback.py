@@ -4,10 +4,6 @@ import numpy as np
 
 BATCH_SIZE = 1
 
-""" 
-no preunroll: just backprop to begining
-make task_flag vectors non-randomizable and trainable
-"""
 
 class NMBackTask():
 

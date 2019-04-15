@@ -68,7 +68,7 @@ class NBackTask():
 
 
 """ 
-Feed forward network with an HD
+
 """
 
 
@@ -102,6 +102,7 @@ class PureEM():
       # unroll
       self.response_logits = self.unroll_trial(self.stim,self.context)
       ## loss and optimization
+      self.y_ph = tf.placeholder(name='true_y_ph',shape=[1,self.ntrials],dtype=tf.int32)
       self.y_hot = tf.one_hot(self.y_ph[:,self.nback:],2)
       self.train_loss = tf.nn.softmax_cross_entropy_with_logits_v2(
                           labels=self.y_hot,logits=self.response_logits)
@@ -120,53 +121,51 @@ class PureEM():
     return None
 
   def placeholders(self):
-    self.trial_ph = tf.placeholder(name='trial_ph',shape=[1,self.ntrials],dtype=tf.int32)
-    self.stim_ph = tf.placeholder(name='stim_ph',shape=[1,self.ntrials],dtype=tf.int32)
-    self.y_ph = tf.placeholder(name='true_y_ph',shape=[1,self.ntrials],dtype=tf.int32)
     self.dropout = tf.placeholder(name='dropout_ph',shape=[],dtype=tf.float32)
-    self.context_emat_ph = tf.placeholder(name='context_emat_ph',shape=[self.ntrials,self.context_edim],dtype=tf.float32)
     return None
 
   def input_embeds(self):
+    """ 
+    untrainable orthogonal stim
+    placeholder context
+    """
+    self.context_emat_ph = tf.placeholder(
+          name='context_emat_ph',
+          shape=[self.ntrials,self.context_edim],
+          dtype=tf.float32)
     self.stim_emat = tf.get_variable(
           name='stim_emat',
           shape=[self.nstim,self.stim_edim],
           trainable=False,
           initializer=tf.initializers.orthogonal)
+    self.randomize_stim_emat = self.stim_emat.initializer
     # lookup
+    self.trial_ph = tf.placeholder(name='trial_ph',shape=[1,self.ntrials],dtype=tf.int32)
+    self.stim_ph = tf.placeholder(name='stim_ph',shape=[1,self.ntrials],dtype=tf.int32)
     context_embed = tf.nn.embedding_lookup(self.context_emat_ph,self.trial_ph,name='context_embed')
     stim_embed = tf.nn.embedding_lookup(self.stim_emat,self.stim_ph,name='stim_embed')
     return context_embed,stim_embed
 
   def unroll_trial(self,stim,context):
     # pre-load memory matrix with nback items
-    self.Mkeys = stim[0,:self.nback,:] # NB online mode 
-    self.Mvalues = context[0,:self.nback,:]
+    self.Memory_stim = stim[0,:self.nback,:]
+    self.Memory_context = context[0,:self.nback,:]
     lstm_output_L = []
     self.respinL = []
-    self.qksimL = []
-    self.retrieved_contextsL = []
+    self.qsimL = []
+    self.retrieved_memoriesL = []
     with tf.variable_scope('CELL_SCOPE') as cellscope:
       # initialize lstm
-      print('non-trainable zero init')
-      init_state_var = tf.get_variable('init_state',
+      init_state_var = tf.get_variable(name='init_state',
                           shape=[1,self.dim],trainable=True,
-                          # initializer=tf.initializers.glorot_normal(0,1)
-                          initializer=tf.initializers.zeros()
+                          initializer=tf.initializers.random_uniform()
                           ) 
       lstm_cell = tf.keras.layers.LSTMCell(self.dim)
       init_state = lstm_cell.get_initial_state(init_state_var)
       lstm_layer = tf.keras.layers.RNN(lstm_cell,return_sequences=False,return_state=False)
-      ##
-      retrieve_null = False
-      feed_context_to_lstm = False
-      feed_context_to_out = True
-      print(
-        'retrieve_null',retrieve_null,
-        'feed_context_to_lstm',feed_context_to_lstm,
-        'feed_context_to_out',feed_context_to_out
-        )
-      ##
+      lstm2logits_layer = tf.keras.layers.Dense(2,activation=None)
+      tf.keras.layers.Dropout(self.dropout)
+
       # unroll trial
       for tstep in range(self.nback,self.ntrials):
         # if tstep > 0: cellscope.reuse_variables()
@@ -174,56 +173,56 @@ class PureEM():
         stim_t = stim[:,tstep,:]
         context_t = context[:,tstep,:]
         # retrieve memory using stim
-        retrieved_contexts,qksim_t = self.retrieve_memoryL(stim_t,self.memory_thresh,retrieve_null)
-        self.qksimL.append(qksim_t)
-        self.retrieved_contextsL.append(retrieved_contexts)
-        # LSTM readout
-        if feed_context_to_lstm:
-          lstm_in = tf.concat([tf.expand_dims(context_t,1),retrieved_contexts],1)
-        else:
-          lstm_in = tf.concat([tf.zeros([1,1,self.context_edim]),retrieved_contexts],1)
-        # lstm_in = retrieved_contexts
+        retrieved_memory,qsim_t = self.retrieve_memory(stim_t,context_t,self.memory_thresh)
+        self.qsimL.append(qsim_t)
+        self.retrieved_memoriesL.append(retrieved_memory)
+
+        ## LSTM readout
+        """ variable length
+        first input is concat([sitm_t,context_t])
+        followed by a variable length sequence of memories
+          each memory also a concat([stim_i,context_i])
+        """
+        lstm_in = tf.concat([
+                    tf.concat([
+                      tf.expand_dims(stim_t,1),
+                      tf.expand_dims(context_t,1)],axis=-1),
+                    retrieved_memory],axis=1)
+        # feed
         lstm_output = lstm_layer(lstm_in,initial_state=init_state)
         lstm_output_L.append(lstm_output)
-        # write to memory (concat new stim to bottom)
-        self.Mkeys = tf.concat([self.Mkeys,stim_t],
-                        axis=0,name='Mkeys_write') # [memory_idx,dim]
-        self.Mvalues = tf.concat([self.Mvalues,context_t],
-                        axis=0,name='Mvalues_write')
+        ## write to memory (concat new stim to bottom)
+        self.Memory_stim = tf.concat([self.Memory_stim,stim_t],
+                              axis=0,name='Mkeys_write') 
+        self.Memory_context = tf.concat([self.Memory_context,context_t],
+                              axis=0,name='Mvalues_write')
       # output projection to logits space
       lstm_outputs = tf.stack(lstm_output_L,axis=1,name='response_logits')
-      if feed_context_to_out:
-        response_in = tf.concat([lstm_outputs,context[:,self.nback:,:]],-1)
-        response_in = tf.keras.layers.Dense(self.dim,activation='relu')(response_in)
-      else:
-        response_in = lstm_outputs
-      response_logits = tf.keras.layers.Dense(2,activation=None)(response_in)
+      response_logits = lstm2logits_layer(lstm_outputs)
     return response_logits
 
-  def retrieve_memoryL(self,query,qksim_thresh,retrieve_null):
+  def retrieve_memory(self,query_stim,query_context,thresh):
     """
+    retrieves memories whose similarity which exceedes threshold
+      similarity computed as stim_sim + context_sim
     returns a list of memory vectors 
       for which the similarity of query-key exceeds threshold
-
+      sorted by similarity
     """ 
-    Mkeys = self.Mkeys
-    Mvalues = self.Mvalues
-    
-    qksim_arr = -tf.keras.metrics.cosine(query,Mkeys) 
-    
-    memoryL = []
-    zeros = tf.zeros([1,self.context_edim])
-    for m_i in range(qksim_arr.shape[0]):
-      if retrieve_null:
-        memory_i = tf.cond(qksim_arr[m_i] > qksim_thresh, 
-                      true_fn=lambda: Mvalues[m_i,:], 
-                      false_fn=lambda: 0*Mvalues[m_i,:])
-        memoryL.append(memory_i)
-        retrieved_contexts = tf.stack(memoryL,axis=0)
-      else:
-        retrieved_contexts = tf.boolean_mask(Mvalues,qksim_arr>qksim_thresh,axis=0)
-
-    retrieved_contexts = tf.expand_dims(retrieved_contexts,axis=0)
-    return retrieved_contexts,qksim_arr
+    # compute query-memory similarity
+    query_stim_sim = -tf.keras.metrics.cosine(query_stim,self.Memory_stim) 
+    query_context_sim = -tf.keras.metrics.cosine(query_context,self.Memory_context) 
+    query_sim = query_stim_sim + query_context_sim
+    # re-sort memory based on similarity to current query
+    sort_idx = tf.argsort(query_sim,axis=-1)
+    query_sim_sorted = tf.gather(query_sim,sort_idx)
+    Memory_sorted = tf.gather(
+                      tf.concat(
+                        [self.Memory_stim,self.Memory_context],axis=-1
+                      ),sort_idx)
+    # thresholded retrieval 
+    retrieved_memory = tf.boolean_mask(Memory_sorted,query_sim_sorted>thresh,axis=0) # variable length
+    retrieved_memory = tf.expand_dims(retrieved_memory,axis=0)
+    return retrieved_memory,query_sim_sorted
 
 
