@@ -52,6 +52,7 @@ class NbackTask_Basic():
   def randomize_emat(self):
     self.emat = tr_uniform(-1,0,[self.ntokens,self.edim])
 
+
 """ 
 Nback with context drift
 used for pure EM
@@ -64,21 +65,13 @@ class NbackTask_PureEM():
     """
     self.nback = nback
     self.ntokens = ntokens
-    self.semat = tr.randn(ntokens,sedim)
     self.cdim = cdim
     self.sedim = sedim
+    self.genseq = self.genseq_balanced
+    self.sample_semat()
     return None
 
-  def gen_ep_data(self,ntrials):
-    """ top wrapper
-    randomly generates an episode 
-      according to class default settings
-    output of this function should 
-      be compatible with input to model
-    """
-    seq = self.genseq(ntrials)
-    context,stim,Y = self.seq2data(seq)
-    return context,stim,Y
+  # wrappers 
 
   def process_seq(self,seq):
     """ 
@@ -110,9 +103,47 @@ class NbackTask_PureEM():
     Y = tr.LongTensor(Y).unsqueeze(0)
     return context,stim,Y
 
-  def genseq(self,ntrials):
+  def gen_ep_data(self,ntrials):
+    """ top wrapper
+    randomly generates an episode 
+      according to class default settings
+    output of this function should 
+      be compatible with input to model
+    """
+    self.sample_semat()
+    seq = self.genseq(ntrials)
+    context,stim,Y = self.seq2data(seq)
+    return context,stim,Y
+
+  # sequence generators
+
+  def genseq_naive(self,ntrials):
+    """ naive sequence generator
+    random sequence each token with equal probability
+    """
     seq = np.random.randint(0,self.ntokens,ntrials)
     return seq
+
+  def genseq_balanced(self,ntrials):
+    """ if number of tokens is large, 
+    this function balances probability of trial types
+    """
+    pr_nback = .6
+    seq = -np.ones(ntrials)
+    seq[:self.nback] = np.random.randint(0,self.ntokens,self.nback)
+    for trial in range(self.nback,ntrials):
+      nback_stim = seq[trial-self.nback]
+      if np.random.binomial(1,pr_nback):
+        stim = nback_stim
+      else: 
+        false_tokens = list(np.arange(self.ntokens))
+        false_tokens.remove(nback_stim)
+        stim = np.random.choice(false_tokens)
+      seq[trial] = stim
+    seq.astype(int)
+    return seq
+
+  # embedding matrices
 
   def sample_cdrift(self,ntrials,delta_std=.3,delta_M=1):
     """ 
@@ -128,5 +159,7 @@ class NbackTask_PureEM():
     return cdrift
 
   def sample_semat(self):
-    semat = tr.randn(ntokens_og,stim_edim)
-    return semat
+    self.semat = tr.randn(self.ntokens,self.sedim)
+    return None
+
+
