@@ -9,7 +9,7 @@ models
 """
 
 class PureEM(tr.nn.Module):
-  def __init__(self,nback=1,indim=4,stsize=5,seed=132,debug=False):
+  def __init__(self,nback=1,indim=4,stsize=5,mthresh=.95,seed=132,debug=False):
     super().__init__()
     # seed
     tr.manual_seed(seed)
@@ -19,7 +19,7 @@ class PureEM(tr.nn.Module):
     self.stsize = stsize
     self.outdim = 2
     # params
-    self.mthresh = .95
+    self.mthresh = mthresh
     self.nback = nback
     # memory
     self.EM = tr.Tensor([])

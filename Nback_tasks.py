@@ -60,13 +60,14 @@ used for pure EM
 
 class NbackTask_PureEM():
 
-  def __init__(self,nback=1,ntokens=3,cdim=2,sedim=2):
+  def __init__(self,nback=1,ntokens=3,cdrift=0.3,cdim=2,sedim=2):
     """ 
     """
     self.nback = nback
     self.ntokens = ntokens
     self.cdim = cdim
     self.sedim = sedim
+    self.cdrift = cdrift
     self.genseq = self.genseq_balanced
     self.sample_semat()
     return None
@@ -145,15 +146,15 @@ class NbackTask_PureEM():
 
   # embedding matrices
 
-  def sample_cdrift(self,ntrials,delta_std=.3,delta_M=1):
+  def sample_cdrift(self,ntrials,delta_M=1):
     """ 
-    drifts ~N(1,delta_std)
+    drifts ~N(1,self.cdrift)
     returns a context embedding matrix [ntrials,cdim]
     """
     cdrift = -np.ones([ntrials,self.cdim])
-    v_t = np.random.normal(delta_M,delta_std,self.cdim)
+    v_t = np.random.normal(delta_M,self.cdrift,self.cdim)
     for step in range(ntrials):
-      delta_t = np.random.normal(delta_M,delta_std,self.cdim)
+      delta_t = np.random.normal(delta_M,self.cdrift,self.cdim)
       v_t += 0.5*delta_t
       cdrift[step] = v_t
     return cdrift

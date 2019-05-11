@@ -18,14 +18,16 @@ tr.manual_seed(seed)
 cdim = 5
 sedim = 10
 stsize = 25
+# task
+cdrift = 5
+train_neps = 100000
 
-train_neps = 50000
-
-task = NbackTask_PureEM(cdim=cdim,sedim=sedim,nback=nback,ntokens=ntokens)
+task = NbackTask_PureEM(nback=nback,ntokens=ntokens,cdrift=cdrift/10,cdim=cdim,sedim=sedim)
 net = PureEM(indim=cdim+sedim,stsize=stsize)
 
 
-model_fpath = "model_data/pureEM-sweep2/pureEM_%i-ntokens_%i-nback_%i-seed_%i"%(stsize,ntokens,nback,seed)
+model_fpath = "model_data/pureEM-sweep2/pureEM_%i-nback_%i-ntokens_%i-cdrift_%i-seed_%i"%(
+                                          stsize,nback,ntokens,cdrift,seed)
 print(model_fpath)
 
 
@@ -63,7 +65,7 @@ train_score = run_model(net,train_neps,
                 training=True,verb=True)
 
 eval_score = run_model(net,neps=500,
-                       gen_data_fn=gen_rand_trials(20),
+                       gen_data_fn=gen_rand_trials(15),
                        training=False)
 
 np.save(model_fpath+'-train_score',train_score)
