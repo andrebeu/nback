@@ -18,16 +18,17 @@ tr.manual_seed(seed)
 cdim = 5
 sedim = 10
 stsize = 25
+mthresh = 95
 # task
 cdrift = 5
 train_neps = 100000
 
 task = NbackTask_PureEM(nback=nback,ntokens=ntokens,cdrift=cdrift/10,cdim=cdim,sedim=sedim)
-net = PureEM(indim=cdim+sedim,stsize=stsize)
+net = PureEM(indim=cdim+sedim,stsize=stsize,mthresh=mthresh/100)
 
 
-model_fpath = "model_data/pureEM-sweep2/pureEM_%i-nback_%i-ntokens_%i-cdrift_%i-seed_%i"%(
-                                          stsize,nback,ntokens,cdrift,seed)
+model_fpath = "model_data/pureEM-sweep2/pureEM_%i-mthresh_%i-nback_%i-ntokens_%i-cdrift_%i-seed_%i"%(
+                                          stsize,mthresh,nback,ntokens,cdrift,seed)
 print(model_fpath)
 
 
