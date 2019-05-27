@@ -92,7 +92,7 @@ class NbackTask_PureEM():
       embeds using 
         new context drift
         class stim emat
-    returns
+    returns embedded
       context,stim
     output of this function should 
       be compatible with input to model
