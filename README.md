@@ -1,5 +1,8 @@
-#  main branch
+#  Item recognition branch
 
 started right after CNN19 submission. 
 
-goal is to simulate all of the set size effects in Oberauer18
+item recognition: 
+- a list of items is presented, a probe is presented, subject answer's whether probe was in list or not
+- load list of items to EM, use probe to query EM, candidates sequentially fed into WM
+
