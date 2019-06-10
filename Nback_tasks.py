@@ -60,14 +60,14 @@ used for pure EM
 
 class NbackTask_PureEM():
 
-  def __init__(self,nback=1,ntokens=3,cdrift=0.3,cdim=2,sedim=2):
+  def __init__(self,nback=1,ntokens=3,cstd=0.3,cedim=2,sedim=2):
     """ 
     """
     self.nback = nback
     self.ntokens = ntokens
-    self.cdim = cdim
+    self.cedim = cedim
     self.sedim = sedim
-    self.cdrift = cdrift
+    self.cstd = cstd
     self.genseq = self.genseq_balanced
     self.sample_semat()
     return None
@@ -148,19 +148,51 @@ class NbackTask_PureEM():
 
   def sample_cdrift(self,ntrials,delta_M=1):
     """ 
-    drifts ~N(1,self.cdrift)
-    returns a context embedding matrix [ntrials,cdim]
+    drifts ~N(1,self.cstd)
+    returns a context embedding matrix [ntrials,cedim]
     """
-    cdrift = -np.ones([ntrials,self.cdim])
-    v_t = np.random.normal(delta_M,self.cdrift,self.cdim)
+    cstd = -np.ones([ntrials,self.cedim])
+    v_t = np.random.normal(delta_M,self.cstd,self.cedim)
     for step in range(ntrials):
-      delta_t = np.random.normal(delta_M,self.cdrift,self.cdim)
+      delta_t = np.random.normal(delta_M,self.cstd,self.cedim)
       v_t += 0.5*delta_t
-      cdrift[step] = v_t
-    return cdrift
+      cstd[step] = v_t
+    return cstd
 
   def sample_semat(self):
     self.semat = tr.randn(self.ntokens,self.sedim)
     return None
 
+
+class SerialRecall():
+  def __init__(self,sedim=10,cedim=5,cstd=0.5):
+    self.sedim = sedim
+    self.cedim = cedim
+    self.cstd = cstd
+    return None
+
+  def gen_ep_data(self,ntrials):
+    """ 
+    output [context,X,Y] compatible with model input [time,edim]
+    """
+    context_drift = tr.Tensor(self.sample_cdrift(ntrials))
+    # stim = tr.randn(ntrials,self.sedim)
+    stim = tr.Tensor(np.random.uniform(0,1,[ntrials,self.sedim]))
+    context_drift = tr.cumsum(stim,0)
+    return context_drift,stim,stim 
+
+  # embedding matrices
+
+  def sample_cdrift(self,ntrials,delta_M=1):
+    """ 
+    drifts ~N(1,self.cstd)
+    returns a context embedding matrix [ntrials,cedim]
+    """
+    cstd = -np.ones([ntrials,self.cedim])
+    v_t = np.random.normal(delta_M,self.cstd,self.cedim)
+    for step in range(ntrials):
+      delta_t = np.random.normal(delta_M,self.cstd,self.cedim)
+      v_t += 0.5*delta_t
+      cstd[step] = v_t
+    return cstd
 

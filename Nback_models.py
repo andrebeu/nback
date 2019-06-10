@@ -46,8 +46,8 @@ class PureEM(tr.nn.Module):
   def forward(self,context,stim):
     """ 
     input
-      context `(time,batch,cedim)`
-      stim `(time,batch,sedim)`
+      context `(time,cedim)`
+      stim `(time,sedim)`
     returns
       yhat `time,batch,outdim` 
         unormalized
