@@ -71,7 +71,29 @@ class PureEM(tr.nn.Module):
     ## check if shufle, to ensure no info in order
     return None
 
+  def retrieve_sort_rand(self,query):
+    """ returns retrieved memories
+    takes
+      query `(1,indim)`
+    returns 
+      memories `num_memories,memory_dim`
+      memory_dim = sedim+cdim
+    """
+    if len(self.EM)==0:
+      return tr.Tensor([])
+    # compute similarity of query to stored memories
+    sim = (tr.cosine_similarity(self.EM,query,dim=-1) + 1).detach()/2
+    sort_idx = np.random.permutation(np.arange(len(sim)))
+    sorted_sim = sim[sort_idx]
+    sorted_EM = self.EM[sort_idx]
+    retrieve_idx = sorted_sim > self.mthresh
+    memories = sorted_EM[retrieve_idx]
+    return memories
+  
   def retrieve(self,query):
+    return self.retrieve_sort_rand(query)
+
+  def retrieve_sort_sim(self,query):
     """ returns retrieved memories
     takes
       query `(1,indim)`
