@@ -31,6 +31,7 @@ class PureEM(tr.nn.Module):
 
   def forward_step(self,x_t,h_t,c_t):
     """ 
+    forward prop single trial
     input: 
       x_t `(batch,dim)`
       h_t `(batch,dim)`
@@ -46,8 +47,8 @@ class PureEM(tr.nn.Module):
   def forward(self,context,stim):
     """ 
     input
-      context `(time,batch,cedim)`
-      stim `(time,batch,sedim)`
+      context `(time,cedim)`
+      stim `(time,sedim)`
     returns
       yhat `time,batch,outdim` 
         unormalized
@@ -55,11 +56,11 @@ class PureEM(tr.nn.Module):
     self.EM = tr.Tensor([])
     percept = tr.cat([context,stim],dim=-1)
     seqlen = len(percept)
-    h_t,c_t = self.initial_state
+    h_0,c_0 = h_t,c_t = self.initial_state
     yhat = -tr.ones(seqlen,1,self.outdim)
     for tstep in range(seqlen):
       x_t = percept[tstep].unsqueeze(0)
-      yhat_t,h_t,c_t = self.forward_step(x_t,h_t,c_t)
+      yhat_t,h_t,c_t = self.forward_step(x_t,h_0,c_0)
       yhat[tstep] = yhat_t
     return yhat
 
