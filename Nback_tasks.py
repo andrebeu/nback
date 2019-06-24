@@ -163,36 +163,101 @@ class NbackTask_PureEM():
     self.semat = tr.randn(self.ntokens,self.sedim)
     return None
 
+""" 
+serial recall is a multi-trial task
+a trial in the n-back task corresponds 
+  to a probe in the serial recall task
+  i.e. a trial is a sequence of probes
+nprobes = setsize
+"""
 
-class SerialRecall():
-  def __init__(self,sedim=10,cedim=5,cstd=0.5):
+class SerialRecallTask():
+
+  def __init__(self,sedim=2):
     self.sedim = sedim
-    self.cedim = cedim
-    self.cstd = cstd
+    self.cedim = 2
     return None
 
-  def gen_ep_data(self,ntrials):
-    """ 
-    output [context,X,Y] compatible with model input [time,edim]
+  def gen_ep_data(self,ntrials,setsize):
     """
-    context_drift = tr.Tensor(self.sample_cdrift(ntrials))
-    # stim = tr.randn(ntrials,self.sedim)
-    stim = tr.Tensor(np.random.uniform(0,1,[ntrials,self.sedim]))
-    context_drift = tr.cumsum(stim,0)
-    return context_drift,stim,stim 
+    episodes are multi-trial
+    output: 
+      C,X,Y [ntrials,setsize,edim]
+      compatible with model input 
+    """
+    C = -np.ones([ntrials,setsize,self.cedim])
+    S = -np.ones([ntrials,setsize,self.sedim])
+    for trial in range(ntrials):
+      S[trial] = np.abs(np.random.normal(0,.1,[setsize,self.sedim]))
+      # C[trial] = self.solar_cdrift(setsize)
+    C = self.solar_cdrift_ep(ntrials,setsize)
+    # convert np to tr
+    C = tr.Tensor(C)
+    S = tr.Tensor(S)
+    return C,S,S
 
-  # embedding matrices
+  # context drifts
 
-  def sample_cdrift(self,ntrials,delta_M=1):
+  def cumsum_cdrift(self,stim):
+    context_drift = tr.cumsum(stim,-1)
+    return context_drift
+
+  def linear_cdrift(self,nprobes,delta_M=1,cstd=0.5,cedim=5):
     """ 
     drifts ~N(1,self.cstd)
-    returns a context embedding matrix [ntrials,cedim]
+    returns a context embedding matrix [nprobes,cedim]
     """
-    cstd = -np.ones([ntrials,self.cedim])
+    cstd = -np.ones([nprobes,self.cedim])
     v_t = np.random.normal(delta_M,self.cstd,self.cedim)
-    for step in range(ntrials):
+    for step in range(nprobes):
       delta_t = np.random.normal(delta_M,self.cstd,self.cedim)
       v_t += 0.5*delta_t
       cstd[step] = v_t
     return cstd
+
+  def sphere_drift(self,nprobes,noise=0.05):
+    """
+    drift on a two dimensional sphere 
+    returns C [nprobes,2]
+    """
+    th = np.pi/(2*nprobes) # drift rate
+    R = np.array([[np.cos(th),-np.sin(th)],
+                  [np.sin(th),np.cos(th)]])
+    x = np.array([1,0]) # initial vector
+    C = np.zeros([nprobes,2]) # context matrix
+    for i in range(nprobes):
+      x = R.dot(x) + np.random.normal(0,noise)
+      x = x/np.linalg.norm(x)
+      C[i] = x
+    return C
+
+  def solar_cdrift(self,nprobes,delta_M=.1,cstd=1):
+    # sample initial point
+    x_init = np.random.uniform(-1,1,[2])
+    x_init /= np.linalg.norm(x_init)
+    # init
+    edim = x_init.shape[-1]
+    arr = -np.ones([nprobes,edim])
+    x = x_init
+    # sample tstep context
+    for step in range(nprobes):
+      arr[step] = x
+      delta_t = np.random.normal(delta_M,cstd,[edim])
+      x += np.abs(delta_t)
+    return arr
+
+  def solar_cdrift_ep(self,ntrials,ntsteps):
+    # deltas
+    tstep_drift = lambda: (np.array([1,1]) + np.random.uniform(0,1))/30
+    trial_shift = lambda: np.random.uniform(0.07,0.15)
+    # drift shift loop
+    context_arr = -np.ones([ntrials,ntsteps,2])
+    th = 0
+    for trial in range(ntrials):
+      th += trial_shift()
+      context_t = np.array([np.cos(th),np.sin(th)])
+      for tstep in range(ntsteps):
+        context_arr[trial,tstep] = context_t
+        context_t += tstep_drift()
+    return context_arr
 
