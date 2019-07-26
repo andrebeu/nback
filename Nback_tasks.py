@@ -1,11 +1,100 @@
 import torch as tr
 import numpy as np
+import context_tools as ct
 
 tr_uniform = lambda a,b,shape: tr.FloatTensor(*shape).uniform_(a,b)
 
 
-""" 
-serial recall is a multi-trial task
+""" Item recognition (Sternberg)
+params: 'setsize', 'ntrials'
+
+an 'itemlist' of size 'setsize' is presented, 
+the final 'item' in 'itemlist' is by assumption the trial 'probe'. 
+the 'probe' can be one of 'novel','lure','old'.
+each 'item' in the 'itemlist' is paired with a 'context'
+"""
+
+class ItemRecognitionTask():
+  """ 
+  description of task implementation
+  todo notes
+  """
+
+  def __init__(self,sedim=2,cedim=2,ntokens=20):
+    self.sedim = sedim
+    self.cedim = cedim
+    self.ntokens = ntokens
+    # initialize stim tokens
+    self.randomize_stokens()
+    return None
+
+  def gen_ep_data(self,ntrials,setsize):
+    """
+    episodes are multi-trial
+    output: 
+      C,X [ntrials,setsize+nprobes,edim]
+      Y [ntrials,1]
+      *compatible with model input*
+    NB probe is provided with regular context vector 
+    """
+    # initialize output arrays for exp data
+    pr_lure = 0.5
+    pr_yes = 0.35
+    self.nprobes = 1
+    S = -np.ones([ntrials,setsize+self.nprobes,self.sedim])
+    Y = -np.ones([ntrials,1])
+    # self.randomize_stokens()
+    self.exp_stokens = np.copy(self.stokens)
+    # sample an `itemlist` from 'stokens' for each trial
+    for trial in range(ntrials):
+      # draw and pop 'itemlist' from 'exp_stokens'
+      itemlist = self.pop_stokens(setsize)
+      # determine trialtype
+      if np.random.binomial(1,pr_yes):
+        Y[trial] = 1
+        # draw 'probe' from 'itemlist'
+        probe_idx = np.random.choice(len(itemlist))
+        probe = [itemlist[probe_idx]]
+      elif (trial>0) and np.random.binomial(1,pr_lure):
+        Y[trial] = 0
+        # set 'probe' to be 'item' from previous 'itemlist'
+        probe_idx = np.random.choice(setsize)
+        probe = [S[trial-1][probe_idx]]
+      else:
+        Y[trial] = 0
+        # draw and pop 'probe' from 'exp_stokens'
+        probe = self.pop_stokens(1) 
+      S[trial] = np.concatenate([itemlist,probe])
+    ###
+    # context drift
+    C = ct.multitrial_linear_cdrift(ntrials,setsize+1,self.cedim)
+    # convert np to tr
+    C = tr.Tensor(C)
+    S = tr.Tensor(S)
+    Y = tr.Tensor(Y)
+    return C,S,Y
+
+  def pop_stokens(self,nitems):
+    items_idx = np.random.choice(len(self.exp_stokens),size=nitems,replace=False)
+    items = self.exp_stokens[items_idx]
+    self.exp_stokens = np.delete(self.exp_stokens,items_idx,axis=0)
+    return items
+
+  def randomize_stokens(self):
+    """ 
+    generates a new array of stimulus tokens
+    """
+    self.stokens = np.abs(np.random.normal(0,.1,[self.ntokens,self.sedim]))
+    return None
+
+
+
+
+
+
+
+""" serial recall
+(multi-trial task)
 a trial in the n-back task corresponds 
   to a probe in the serial recall task
   i.e. a trial is a sequence of probes
@@ -100,56 +189,6 @@ class SerialRecallTask():
         context_arr[trial,tstep] = context_t
         context_t += tstep_drift()
     return context_arr
-
-
-
-"""
-This is the PM task used in WM+EM model
-set num_pm_trials to 0 to make it an n-back task.
-"""
-
-class NbackTask_Basic():
-
-  def __init__(self,nback,ntokens,edim,seed):
-    """ 
-    """
-    np.random.seed(seed)
-    tr.manual_seed(seed)
-    self.nback = nback
-    self.ntokens = ntokens
-    self.edim = edim
-    self.randomize_emat()
-    return None
-
-  def gen_seq(self,ntrials=20):
-    """
-    if pm_trial_position is not specified, they are randomly sampled
-      rand pm_trial_position for training, fixed for eval
-    """
-    # generate og stim
-    seq = np.random.randint(0,self.ntokens,ntrials)
-    X = seq
-    # form Y 
-    Xroll = np.roll(X,self.nback)
-    Y = (X == Xroll).astype(int) # nback trials
-    return X,Y
-
-  def embed_seq(self,X_seq,Y_seq):
-    """ 
-    takes 1-D input sequences
-    returns 
-      X_embed `(time,batch,edim)`[torch]
-      Y_embed `(time,batch)`[torch]
-    """
-    # take signal_dim (time,edim_signal_dim)
-    X_embed = self.emat[X_seq] 
-    # include batch dim   
-    X_embed = tr.unsqueeze(X_embed,1)
-    Y_embed = tr.unsqueeze(tr.LongTensor(Y_seq),1)
-    return X_embed,Y_embed
-
-  def randomize_emat(self):
-    self.emat = tr_uniform(-1,0,[self.ntokens,self.edim])
 
 
 """ 
@@ -262,3 +301,51 @@ class NbackTask_PureEM():
     self.semat = tr.randn(self.ntokens,self.sedim)
     return None
 
+
+"""
+This is the PM task used in WM+EM model
+set num_pm_trials to 0 to make it an n-back task.
+"""
+
+class NbackTask_Basic():
+
+  def __init__(self,nback,ntokens,edim,seed):
+    """ 
+    """
+    np.random.seed(seed)
+    tr.manual_seed(seed)
+    self.nback = nback
+    self.ntokens = ntokens
+    self.edim = edim
+    self.randomize_emat()
+    return None
+
+  def gen_seq(self,ntrials=20):
+    """
+    if pm_trial_position is not specified, they are randomly sampled
+      rand pm_trial_position for training, fixed for eval
+    """
+    # generate og stim
+    seq = np.random.randint(0,self.ntokens,ntrials)
+    X = seq
+    # form Y 
+    Xroll = np.roll(X,self.nback)
+    Y = (X == Xroll).astype(int) # nback trials
+    return X,Y
+
+  def embed_seq(self,X_seq,Y_seq):
+    """ 
+    takes 1-D input sequences
+    returns 
+      X_embed `(time,batch,edim)`[torch]
+      Y_embed `(time,batch)`[torch]
+    """
+    # take signal_dim (time,edim_signal_dim)
+    X_embed = self.emat[X_seq] 
+    # include batch dim   
+    X_embed = tr.unsqueeze(X_embed,1)
+    Y_embed = tr.unsqueeze(tr.LongTensor(Y_seq),1)
+    return X_embed,Y_embed
+
+  def randomize_emat(self):
+    self.emat = tr_uniform(-1,0,[self.ntokens,self.edim])

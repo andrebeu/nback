@@ -5,26 +5,26 @@ import numpy as np
 
 
 """
-Item-recognition (sternberg) task
+Item-recognition (sternberg) Task
 """
 
 class ItemRecognitionEM(tr.nn.Module):
-
   """ 
-
   """
 
-  def __init__(self,sedim,stsize,seed=155):
+  def __init__(self,sedim,cedim,stsize,seed=155):
+
     super().__init__()
     self.mthresh = .88
     self.sedim = sedim
+    self.cedim = cedim
     self.stsize = stsize
-    self.cedim = 2
     self.WM_lstm = tr.nn.LSTM(self.sedim+self.cedim,self.stsize)
-    self.ff_out = tr.nn.Linear(self.stsize,self.sedim)
+    self.ff_out = tr.nn.Linear(self.stsize,2)
     self.initial_state = tr.rand(2,1,self.stsize,requires_grad=True)
     return None
 
+  # forward prop
 
   def forward_step(self,emL):
     """ 
@@ -69,14 +69,14 @@ class ItemRecognitionEM(tr.nn.Module):
 
   def forward(self,context_arr,stim_arr):
     """
-    input: episode data 
-      S,C: `[trial,probe,edim]
-    output: episode_yhat 
-      Y: `[trial,probe,sdim]`
-    loop over trials (sequence of probes of len `setsize`):
+    loop over trials (seq of items len `setsize+nprobes`):
       encode trial data in EM
       forward prop trial
 
+    input: episode data 
+      stim,context: `[trial,items+probe,edim]
+    output: episode_yhat 
+      yhat: `[trial,batch,2]`
     """
     # task params
     ntrials = context_arr.shape[0]
@@ -85,10 +85,10 @@ class ItemRecognitionEM(tr.nn.Module):
     self.EM_K = tr.Tensor([])
     self.EM_V = tr.Tensor([])
     # unroll (multi_trial) episode 
-    yhat_episode = -tr.ones(ntrials,setsize,self.sedim)
+    yhat_ep = -tr.ones(ntrials,setsize,self.sedim)
     # episode loop
     for trial in range(ntrials):
-      # if DBG: print('\n--trial',trial)
+      print('\n--trial',trial)
       trial_context = context_arr[trial]
       trial_stim = stim_arr[trial]
       # encode EM
@@ -96,9 +96,10 @@ class ItemRecognitionEM(tr.nn.Module):
       # trial loop
       yhat_trial = self.forward_trial(trial_context) # [setsize,sedim]
       # if DBG: print('yh_tr:',yhat_trial.shape)
-      yhat_episode[trial] = yhat_trial
-    return yhat_episode
+      yhat_ep[trial] = yhat_trial
+    return yhat_ep
 
+  # EM ops
 
   def encode(self,trial_context,trial_stim):
     # if DBG: print('E')
@@ -130,8 +131,6 @@ class ItemRecognitionEM(tr.nn.Module):
     # retrievals
     emL = sorted_EM_V[retrieve_idx]
     return emL
-
-
 
 
 
@@ -277,6 +276,7 @@ N-BACK TASK
 """
 
 class PureEM(tr.nn.Module):
+
   def __init__(self,indim=4,stsize=5,mthresh=.95,seed=132):
     super().__init__()
     # seed
