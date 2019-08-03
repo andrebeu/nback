@@ -20,12 +20,14 @@ class ItemRecognitionTask():
   todo notes
   """
 
-  def __init__(self,sedim=2,cedim=2,ntokens=20):
+  def __init__(self,sedim=2,cedim=2,ntokens=20,seed=122):
+    np.random.seed(seed)
+    tr.manual_seed(seed)
     self.sedim = sedim
     self.cedim = cedim
     self.ntokens = ntokens
     # initialize stim tokens
-    self.randomize_stokens()
+    self.sample_stokens()
     return None
 
   def gen_ep_data(self,ntrials,setsize):
@@ -39,11 +41,11 @@ class ItemRecognitionTask():
     """
     # initialize output arrays for exp data
     pr_lure = 0.5
-    pr_yes = 0.35
+    pr_yes = 0.5
     self.nprobes = 1
     S = -np.ones([ntrials,setsize+self.nprobes,self.sedim])
     Y = -np.ones([ntrials,1])
-    # self.randomize_stokens()
+    # self.sample_stokens()
     self.exp_stokens = np.copy(self.stokens)
     # sample an `itemlist` from 'stokens' for each trial
     for trial in range(ntrials):
@@ -71,7 +73,7 @@ class ItemRecognitionTask():
     # convert np to tr
     C = tr.Tensor(C)
     S = tr.Tensor(S)
-    Y = tr.Tensor(Y)
+    Y = tr.LongTensor(Y)
     return C,S,Y
 
   def pop_stokens(self,nitems):
@@ -80,7 +82,7 @@ class ItemRecognitionTask():
     self.exp_stokens = np.delete(self.exp_stokens,items_idx,axis=0)
     return items
 
-  def randomize_stokens(self):
+  def sample_stokens(self):
     """ 
     generates a new array of stimulus tokens
     """

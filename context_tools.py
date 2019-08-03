@@ -2,6 +2,7 @@ import numpy as np
 
 def linear_cdrift(nsteps,init_offset=0,delta_M=.1,cstd=0.05,cedim=2):
   """ 
+  drift starts from 'init_offset'*ones
   drifts ~N(1,self.cstd)
   returns a context embedding matrix [nsteps,cedim]
   """
@@ -14,6 +15,9 @@ def linear_cdrift(nsteps,init_offset=0,delta_M=.1,cstd=0.05,cedim=2):
   return context
 
 def multitrial_linear_cdrift(ntrials,nsteps,cedim=2):
+  """ 
+  multi-trial drift in direction of ones
+  """
   context = -np.ones([ntrials,nsteps,cedim])
   for trial in range(ntrials):
     context[trial] = linear_cdrift(nsteps,init_offset=trial,cedim=cedim)

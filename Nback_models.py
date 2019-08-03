@@ -12,59 +12,50 @@ class ItemRecognitionEM(tr.nn.Module):
   """ 
   """
 
-  def __init__(self,sedim,cedim,stsize,seed=155):
-
+  def __init__(self,sedim,cedim,stsize,emthresh=-10,seed=155):
     super().__init__()
-    self.mthresh = .88
+    np.random.seed(seed)
+    tr.manual_seed(seed)
+    self.emthresh = emthresh
     self.sedim = sedim
     self.cedim = cedim
     self.stsize = stsize
-    self.WM_lstm = tr.nn.LSTM(self.sedim+self.cedim,self.stsize)
-    self.ff_out = tr.nn.Linear(self.stsize,2)
-    self.initial_state = tr.rand(2,1,self.stsize,requires_grad=True)
+    self.outdim = 2
+    indim = self.sedim+self.cedim
+    self.ff_in = tr.nn.Linear(indim,indim)
+    self.WM_lstm = tr.nn.LSTM(indim,self.stsize)
+    self.ff_hid = tr.nn.Linear(self.stsize,self.stsize)
+    self.ff_out = tr.nn.Linear(self.stsize,self.outdim)
+    self.initial_state = tr.nn.Parameter(tr.rand(2,1,self.stsize,requires_grad=True))
+    self.resp_flag = tr.nn.Parameter(tr.rand(1,indim,requires_grad=True))
     return None
 
   # forward prop
 
-  def forward_step(self,emL):
+  def forward_trial(self,probe_context,probe_stim):
     """ 
-    WM loop over candidate memories in emL
-    single time step 
-      takes emL [num_memories,cdim+sdim]
-      returns yhat_tstep [1,sedim]
+    query EM
+    feed emL to WM
+    return yhat_trial
+    WM is reset
     """
-    # if DBG: print('WM')
-    h_t,c_t = self.initial_state
-    emL = tr.unsqueeze(emL,1)
-    yhat_tstep,(h_t,c_t) = self.WM_lstm(emL,(h_t.unsqueeze(0),c_t.unsqueeze(0)))
-    yhat_tstep = yhat_tstep[-1]
-    yhat_tstep = self.ff_out(yhat_tstep).relu()
-    return yhat_tstep
-
-  def forward_trial(self,context_trial):
-    """ 
-    input: trial context data 
-      C: `[probe,cedim]
-    loop over probes (timestep) in trial
-      query EM with context_t 
-        returns a variable length emL
-          each em is a cat([context,stim])
-        sorted according to similarity
-          ensures current context always presented at beginning
-      emL sequentially fed through WM lstm
-    """
-    setsize = context_trial.shape[0]
-    yhat_trial = -tr.ones(setsize,self.sedim)
-    for tstep in range(setsize):
-      # if DBG: print('-probe',tstep)
-      # retrieve EM
-      em_query = context_trial[tstep]
-      emL = self.retrieve_sort_sim(em_query)
-      # if DBG: print('   len_emL',emL.shape)
-      # feed WM
-      yhat_tstep = self.forward_step(emL)
-      yhat_trial[tstep] = yhat_tstep
-      # if DBG: print('yh_ts:',yhat_tstep.shape)
+    # print('-trial')
+    # print('EMK:',self.EM_K.shape)
+    # query EM
+    em_query = tr.cat([probe_context,probe_stim],-1).unsqueeze(0)
+    # print('q',em_query)
+    emL = self.retrieve_sort_sim(em_query)
+    # print('emL',emL.shape)
+    WMinput = tr.cat([emL,em_query],0).unsqueeze(1)
+    # print('WMin\n',WMinput)
+    # feed emL to Wm
+    WMinput = self.ff_in(WMinput)
+    h_0,c_0 = self.initial_state
+    yhat_seq,(h_T,c_T) = self.WM_lstm(WMinput,(h_0.unsqueeze(0),c_0.unsqueeze(0)))
+    # print('yhat_seq',yhat_seq.shape)
+    yhat_trial = yhat_seq[-1]
+    # yhat_trial = self.ff_hid(yhat_trial).relu()
+    yhat_trial = self.ff_out(yhat_trial)
     return yhat_trial
 
   def forward(self,context_arr,stim_arr):
@@ -78,37 +69,37 @@ class ItemRecognitionEM(tr.nn.Module):
     output: episode_yhat 
       yhat: `[trial,batch,2]`
     """
+    # print('--ep')
     # task params
+    nprobes = 1
     ntrials = context_arr.shape[0]
-    setsize = context_arr.shape[1]
+    setsize = context_arr.shape[1] - nprobes
     # initialize EM
     self.EM_K = tr.Tensor([])
     self.EM_V = tr.Tensor([])
     # unroll (multi_trial) episode 
-    yhat_ep = -tr.ones(ntrials,setsize,self.sedim)
+    yhat_ep = -tr.ones(ntrials,1,self.outdim)
     # episode loop
     for trial in range(ntrials):
-      print('\n--trial',trial)
-      trial_context = context_arr[trial]
-      trial_stim = stim_arr[trial]
-      # encode EM
-      self.encode(trial_context,trial_stim)
+      trial_context = context_arr[trial][:-nprobes]
+      trial_stim = stim_arr[trial][:-nprobes]
+      # encode EM {context+stim: context+stim}
+      Mkey = tr.cat([trial_context,trial_stim],-1)
+      Mvalue = tr.cat([trial_context,trial_stim],-1)
+      self.encode(Mkey,Mvalue)
       # trial loop
-      yhat_trial = self.forward_trial(trial_context) # [setsize,sedim]
-      # if DBG: print('yh_tr:',yhat_trial.shape)
+      probe_context = context_arr[trial][-1]
+      probe_stim = stim_arr[trial][-1]
+      yhat_trial = self.forward_trial(probe_context,probe_stim)
       yhat_ep[trial] = yhat_trial
     return yhat_ep
 
   # EM ops
 
-  def encode(self,trial_context,trial_stim):
+  def encode(self,keys,values):
     # if DBG: print('E')
-    self.EM_K = tr.cat([self.EM_K,
-                  trial_context
-                  ],0)
-    self.EM_V = tr.cat([self.EM_V,
-                  tr.cat([trial_context,trial_stim],-1)
-                  ],0)
+    self.EM_K = tr.cat([self.EM_K,keys],0)
+    self.EM_V = tr.cat([self.EM_V,values],0)
     return None
 
   def retrieve_sort_sim(self,query):
@@ -119,15 +110,15 @@ class ItemRecognitionEM(tr.nn.Module):
       emL: `num_memories,memory_dim`
       memory_dim = sdim+cdim
     """
-    # if DBG: print('R')
     # L2 distance
     dist = tr.nn.modules.distance.PairwiseDistance(2)
     sim = 1-dist(self.EM_K,query)
+    # print('s',sim)
     # sort contents of EM according sim
-    sorted_sim,sort_idx = tr.sort(sim,descending=True)
+    sorted_sim,sort_idx = tr.sort(sim,descending=False)
     sorted_EM_V = self.EM_V[sort_idx]
     # above threshold indices
-    retrieve_idx = sorted_sim > self.mthresh
+    retrieve_idx = sorted_sim > self.emthresh
     # retrievals
     emL = sorted_EM_V[retrieve_idx]
     return emL
@@ -153,7 +144,7 @@ class SerialRecallEM(tr.nn.Module):
 
   def __init__(self,sedim,stsize,seed=155):
     super().__init__()
-    self.mthresh = .88
+    self.emthresh = .88
     self.sedim = sedim
     self.stsize = stsize
     self.cedim = 2
@@ -263,7 +254,7 @@ class SerialRecallEM(tr.nn.Module):
     sorted_sim,sort_idx = tr.sort(sim,descending=True)
     sorted_EM_V = self.EM_V[sort_idx]
     # above threshold indices
-    retrieve_idx = sorted_sim > self.mthresh
+    retrieve_idx = sorted_sim > self.emthresh
     # retrievals
     emL = sorted_EM_V[retrieve_idx]
     return emL
@@ -277,7 +268,7 @@ N-BACK TASK
 
 class PureEM(tr.nn.Module):
 
-  def __init__(self,indim=4,stsize=5,mthresh=.95,seed=132):
+  def __init__(self,indim=4,stsize=5,emthresh=.95,seed=132):
     super().__init__()
     # seed
     tr.manual_seed(seed)
@@ -286,7 +277,7 @@ class PureEM(tr.nn.Module):
     self.stsize = stsize
     self.outdim = 2
     # params
-    self.mthresh = mthresh
+    self.emthresh = emthresh
     # memory
     self.EM = tr.Tensor([])
     # layers
@@ -355,7 +346,7 @@ class PureEM(tr.nn.Module):
     sort_idx = np.random.permutation(np.arange(len(sim)))
     sorted_sim = sim[sort_idx]
     sorted_EM = self.EM[sort_idx]
-    retrieve_idx = sorted_sim > self.mthresh
+    retrieve_idx = sorted_sim > self.emthresh
     memories = sorted_EM[retrieve_idx]
     return memories
 
@@ -373,7 +364,7 @@ class PureEM(tr.nn.Module):
     sim = (tr.cosine_similarity(self.EM,query,dim=-1) + 1).detach()/2
     sorted_sim,sort_idx = tr.sort(sim,descending=True)
     sorted_EM = self.EM[sort_idx]
-    retrieve_idx = sorted_sim > self.mthresh
+    retrieve_idx = sorted_sim > self.emthresh
     memories = sorted_EM[retrieve_idx]
     return memories
 
