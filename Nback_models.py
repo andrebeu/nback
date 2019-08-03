@@ -111,14 +111,14 @@ class ItemRecognitionEM(tr.nn.Module):
       memory_dim = sdim+cdim
     """
     # L2 distance
-    dist = tr.nn.modules.distance.PairwiseDistance(2)
-    sim = 1-dist(self.EM_K,query)
-    # print('s',sim)
-    # sort contents of EM according sim
-    sorted_sim,sort_idx = tr.sort(sim,descending=False)
+    ls2dist = tr.nn.modules.distance.PairwiseDistance(2)
+    dist = ls2dist(self.EM_K,query)
+  
+    # sort contents of EM according dist
+    sorted_dist,sort_idx = tr.sort(dist,descending=False)
     sorted_EM_V = self.EM_V[sort_idx]
     # above threshold indices
-    retrieve_idx = sorted_sim > self.emthresh
+    retrieve_idx = sorted_dist < self.emthresh
     # retrievals
     emL = sorted_EM_V[retrieve_idx]
     return emL
@@ -177,7 +177,7 @@ class SerialRecallEM(tr.nn.Module):
       query EM with context_t 
         returns a variable length emL
           each em is a cat([context,stim])
-        sorted according to similarity
+        sorted according to dissimilarity
           ensures current context always presented at beginning
       emL sequentially fed through WM lstm
     """

@@ -12,15 +12,16 @@
 printf "\n\n\n --ntasks-per-node=1 -c=8 ntasks-per-socket=4 \n\n\n"
 
 seed=${1}
-nback=${2}
-ntokens=${3}
+ntrials=${2}
+setsize=${3}
+emthresh=${4}
 
 module load anaconda3/4.4.0
 module load cudnn/cuda-9.1/7.1.2
 
 printf "\n\n NBACK Task \n\n"
 
-srun python -u "/tigress/abeukers/wd/nback/pureEM-sweep2.py" ${seed} ${nback} ${ntokens}
+srun python -u "/tigress/abeukers/wd/nback/IRsweep.py" ${seed} ${ntrials} ${setsize} ${emthresh}
 
 printf "\n\nGPU profiling \n\n"
 sacct --format="elapsed,CPUTime,TotalCPU"

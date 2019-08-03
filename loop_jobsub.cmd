@@ -8,13 +8,15 @@ stamp=$(date +"%m%d%H%M%S")
 wd_dir="/tigress/abeukers/wd/nback"
 ##
 
-declare -a nback_arr=(1 2 3)
-declare -a ntokens_arr=(3 4 5 10)
+declare -a setsize_arr=(3 4 5 6)
+declare -a ntrials_arr=(2 3 4 5 10 15 20)
 
-for seed in {0..5}; do 
-	for nback in "${nback_arr[@]}"; do 
-		for ntokens in "${ntokens_arr[@]}"; do 
-			sbatch ${wd_dir}/gpu_jobsub.cmd "${seed}" "${nback}" "${ntokens}"
+for seed in {0..3}; do
+  for emthresh in {0..10}; do 
+  	for setsize in "${setsize_arr[@]}"; do 
+  		for ntrials in "${ntrials_arr[@]}"; do 
+  			sbatch ${wd_dir}/gpu_jobsub.cmd ${seed} ${ntrials} ${setsize} ${emthresh}
+      done
 		done
 	done
 done
