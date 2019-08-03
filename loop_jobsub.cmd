@@ -13,10 +13,10 @@ declare -a ntrials_arr=(2 3 4 5 10 15 20)
 
 for seed in {0..3}; do
   for emthresh in {0..10}; do 
-  	for setsize in "${setsize_arr[@]}"; do 
-  		for ntrials in "${ntrials_arr[@]}"; do 
-  			sbatch ${wd_dir}/gpu_jobsub.cmd ${seed} ${ntrials} ${setsize} ${emthresh}
+    for setsize in "${setsize_arr[@]}"; do 
+      for ntrials in "${ntrials_arr[@]}"; do 
+        sbatch ${wd_dir}/gpu_jobsub.cmd ${seed} ${ntrials} ${setsize} ${emthresh}
       done
-		done
-	done
+    done
+  done
 done
