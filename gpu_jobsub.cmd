@@ -2,7 +2,7 @@
 
 #SBATCH --gpu-accounting
 
-#SBATCH -t 24:00:00			# runs for 48 hours (max)  
+#SBATCH -t 5:00:00			# runs for 48 hours (max)  
 #SBATCH -c 8				# number of cores 4
 #SBATCH -N 1				# node count 
 #SBATCH --ntasks-per-node=1
@@ -21,7 +21,7 @@ module load cudnn/cuda-9.1/7.1.2
 
 printf "\n\n NBACK Task \n\n"
 
-srun python -u "/tigress/abeukers/wd/nback/IRsweep.py" ${seed} ${ntrials} ${setsize} ${emthresh}
+srun python -u "/tigress/abeukers/wd/nback/IRsweep_noiseless.py" ${seed} ${ntrials} ${setsize} ${emthresh}
 
 printf "\n\nGPU profiling \n\n"
 sacct --format="elapsed,CPUTime,TotalCPU"

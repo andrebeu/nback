@@ -69,7 +69,6 @@ class ItemRecognitionTask():
       S[trial] = np.concatenate([itemlist,probe])
     ###
     # context drift
-    # C = ct.multitrial_linear_cdrift(ntrials,setsize+1,self.cedim)
     C = ct.multitrial_square_cdrift(ntrials,setsize+1)
     # convert np to tr
     C = tr.Tensor(C)
