@@ -40,7 +40,7 @@ def run_model(net,task,neps,ntrials,setsize,training=True,verb=True):
   for ep in range(neps):
     # task.sample_stokens()
     # gen stim, forward prop
-    C,S,ytarget = task.gen_ep_data(ntrials,setsize)
+    C,S,ytarget = task.gen_exp_data(ntrials,setsize)
     yhat = net(C,S)
     # scoring, backprop
     score[ep] = (maxsoftmax(yhat) == ytarget).squeeze()

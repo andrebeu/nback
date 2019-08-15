@@ -113,6 +113,7 @@ class ItemRecognitionEM(tr.nn.Module):
     # L2 distance
     ls2dist = tr.nn.modules.distance.PairwiseDistance(2)
     dist = ls2dist(self.EM_K,query)
+    # print(dist)
     # sort contents of EM according dist
     sorted_dist,sort_idx = tr.sort(dist,descending=True)
     sorted_EM_V = self.EM_V[sort_idx]

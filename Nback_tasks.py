@@ -30,7 +30,7 @@ class ItemRecognitionTask():
     self.sample_stokens()
     return None
 
-  def gen_ep_data(self,ntrials,setsize):
+  def gen_exp_data(self,ntrials,setsize):
     """
     episodes are multi-trial
     output: 
@@ -89,6 +89,24 @@ class ItemRecognitionTask():
     self.stokens = np.abs(np.random.normal(0,.1,[self.ntokens,self.sedim]))
     return None
 
+  def gen_serial_position_trial(self,setsize,match_position):
+    """ *compatible with model input*
+    """
+    self.exp_stokens = np.copy(self.stokens)
+    itemlist = self.pop_stokens(setsize) 
+    itemlist = np.concatenate([
+                itemlist,
+                itemlist[match_position-1:match_position,:]
+                ])
+    C = ct.multitrial_square_cdrift(1,setsize+1)
+    S = np.expand_dims(itemlist,0) # inlcude trial dim
+    Y = np.array([[1]])
+    # torch
+    C = tr.Tensor(C)
+    S = tr.Tensor(S)
+    Y = tr.LongTensor(Y)
+    return C,S,Y
+
 
 
 
@@ -110,7 +128,7 @@ class SerialRecallTask():
     self.cedim = 2
     return None
 
-  def gen_ep_data(self,ntrials,setsize):
+  def gen_exp_data(self,ntrials,setsize):
     """
     episodes are multi-trial
     output: 
@@ -244,7 +262,7 @@ class NbackTask_PureEM():
     Y = tr.LongTensor(Y).unsqueeze(0)
     return context,stim,Y
 
-  def gen_ep_data(self,ntrials):
+  def gen_exp_data(self,ntrials):
     """ top wrapper
     randomly generates an episode 
       according to class default settings
